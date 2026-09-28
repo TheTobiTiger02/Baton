@@ -1,0 +1,267 @@
+<Window x:Class="Baton.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:Baton.App.Controls"
+        xmlns:app="clr-namespace:Baton.App"
+        Title="Baton" Icon="Assets/Baton.ico" Width="980" Height="700" MinWidth="720" MinHeight="520"
+        WindowStartupLocation="CenterScreen" Style="{StaticResource {x:Type Window}}">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="48" ResizeBorderThickness="6" GlassFrameThickness="-1" CornerRadius="0" UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <Style x:Key="NavLabel" TargetType="TextBlock">
+            <Setter Property="Margin" Value="12,0,0,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="NavGlyph" TargetType="TextBlock" BasedOn="{StaticResource IconGlyph}">
+            <Setter Property="FontSize" Value="16" />
+        </Style>
+        <Style x:Key="EmptyText" TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
+            <Setter Property="Foreground" Value="{DynamicResource TextTertiaryBrush}" />
+            <Setter Property="Margin" Value="0,0,0,16" />
+        </Style>
+        <Style x:Key="SettingsTitle" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style x:Key="SettingsDescription" TargetType="TextBlock" BasedOn="{StaticResource CaptionText}">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,2,0,0" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Title bar -->
+        <StackPanel Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
+            <Image Source="Assets/Baton.png" Width="18" Height="18" />
+            <TextBlock Text="Baton" Margin="10,0,0,0" FontSize="12" VerticalAlignment="Center" />
+        </StackPanel>
+        <controls:CaptionButtons HorizontalAlignment="Right" />
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="220" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Navigation -->
+            <StackPanel Margin="8,4,8,8">
+                <RadioButton x:Name="NavHome" GroupName="Nav" IsChecked="True" Style="{StaticResource SettingsNavButton}" Checked="Nav_Checked">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE80F;" Style="{StaticResource NavGlyph}" />
+                        <TextBlock Text="Continue" Style="{StaticResource NavLabel}" />
+                    </StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="NavDevices" GroupName="Nav" Style="{StaticResource SettingsNavButton}" Checked="Nav_Checked">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE8EA;" Style="{StaticResource NavGlyph}" />
+                        <TextBlock Text="Devices" Style="{StaticResource NavLabel}" />
+                    </StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="NavSettings" GroupName="Nav" Style="{StaticResource SettingsNavButton}" Checked="Nav_Checked">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE713;" Style="{StaticResource NavGlyph}" />
+                        <TextBlock Text="Settings" Style="{StaticResource NavLabel}" />
+                    </StackPanel>
+                </RadioButton>
+            </StackPanel>
+
+            <Border Grid.Column="1" Background="{DynamicResource LayerBrush}" BorderBrush="{DynamicResource LayerStrokeBrush}"
+                    BorderThickness="1,1,0,0" CornerRadius="8,0,0,0">
+                <Grid>
+                    <!-- Continue -->
+                    <ScrollViewer x:Name="HomePage" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="32,28,32,32" MaxWidth="760" HorizontalAlignment="Left">
+                            <TextBlock Text="Continue anywhere" Style="{StaticResource PageTitle}" />
+                            <TextBlock Style="{StaticResource BodyText}" Margin="0,6,0,24">
+                                Press <Run FontWeight="SemiBold">Ctrl+Alt+→</Run> to send what you're doing to your phone,
+                                or <Run FontWeight="SemiBold">Ctrl+Alt+←</Run> to bring your phone's activity here.
+                            </TextBlock>
+
+                            <Border Style="{StaticResource InfoBar}" Margin="0,0,0,24"
+                                    Visibility="{Binding HasPhones, Converter={StaticResource InverseBoolToVis}}">
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Content="Pair a phone" Style="{StaticResource AccentButton}" Click="Pair_Click" />
+                                    <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                        <TextBlock Text="Pair your phone to get started" FontWeight="SemiBold" />
+                                        <TextBlock Text="Install Baton on your Android phone, then scan the code Baton shows here." Style="{StaticResource CaptionText}" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource InfoBar}" Margin="0,0,0,16" Background="{DynamicResource AccentSubtleBrush}"
+                                    Visibility="{Binding IsStreaming, Converter={StaticResource BoolToVisConverter}}">
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Content="Stop" Command="{Binding StopStreaming}" VerticalAlignment="Center" />
+                                    <TextBlock Text="&#xE7F4;" Style="{StaticResource IconGlyph}" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0" />
+                                    <TextBlock VerticalAlignment="Center" TextWrapping="Wrap"><Run Text="Streaming " /><Run Text="{Binding Streaming, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=" to your phone" /></TextBlock>
+                                </DockPanel>
+                            </Border>
+                            <ContentControl Content="{Binding Local}" ContentTemplate="{StaticResource DeviceHeader}" Focusable="False" />
+                            <ItemsControl ItemsSource="{Binding Local.Activities}" ItemTemplate="{StaticResource ActivityCard}" Focusable="False" />
+                            <TextBlock Style="{StaticResource EmptyText}" Text="Play a video or music, or open a page in your browser. It will show up here, ready to send."
+                                       Visibility="{Binding Local.HasActivity, Converter={StaticResource InverseBoolToVis}}" />
+
+                            <ItemsControl ItemsSource="{Binding Phones}" Focusable="False" Margin="0,12,0,0">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type app:DeviceViewModel}">
+                                        <StackPanel Margin="0,0,0,12">
+                                            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource DeviceHeader}" Focusable="False" />
+                                            <ItemsControl ItemsSource="{Binding Activities}" ItemTemplate="{StaticResource ActivityCard}" Focusable="False" />
+                                            <TextBlock Style="{StaticResource EmptyText}" Text="Nothing to continue from this phone right now."
+                                                       Visibility="{Binding HasActivity, Converter={StaticResource InverseBoolToVis}}" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- Devices -->
+                    <ScrollViewer x:Name="DevicesPage" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+                        <StackPanel Margin="32,28,32,32" MaxWidth="760" HorizontalAlignment="Left">
+                            <DockPanel Margin="0,0,0,24">
+                                <Button DockPanel.Dock="Right" Style="{StaticResource AccentButton}" Click="Pair_Click" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE710;" Style="{StaticResource IconGlyph}" FontSize="14" Margin="0,0,8,0" />
+                                        <TextBlock Text="Pair a phone" />
+                                    </StackPanel>
+                                </Button>
+                                <TextBlock Text="Devices" Style="{StaticResource PageTitle}" />
+                            </DockPanel>
+                            <Border Style="{StaticResource SettingsCard}">
+                                <DockPanel>
+                                    <TextBlock Text="&#xE7F8;" Style="{StaticResource IconGlyph}" FontSize="20" Margin="4,0,18,0" />
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Local.Name}" Style="{StaticResource SettingsTitle}" />
+                                        <TextBlock Text="This PC" Style="{StaticResource SettingsDescription}" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                            <ItemsControl ItemsSource="{Binding Phones}" Focusable="False">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type app:DeviceViewModel}">
+                                        <Border Style="{StaticResource SettingsCard}">
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Right" Content="Forget" VerticalAlignment="Center" Click="Forget_Click" Tag="{Binding}" />
+                                                <TextBlock Text="{Binding Glyph}" Style="{StaticResource IconGlyph}" FontSize="20" Margin="4,0,18,0" />
+                                                <StackPanel VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Name}" Style="{StaticResource SettingsTitle}" />
+                                                    <TextBlock Text="{Binding StatusText}" Style="{StaticResource SettingsDescription}" />
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- Settings -->
+                    <ScrollViewer x:Name="SettingsPage" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+                        <StackPanel Margin="32,28,32,32" MaxWidth="760" HorizontalAlignment="Left">
+                            <TextBlock Text="Settings" Style="{StaticResource PageTitle}" Margin="0,0,0,24" />
+
+                            <TextBlock Text="Shortcuts" Style="{StaticResource SettingsGroupHeader}" />
+                            <Border Style="{StaticResource SettingsCard}">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Style="{StaticResource SettingsTitle}"><Run FontWeight="SemiBold">Ctrl+Alt+→</Run>  Send to phone</TextBlock>
+                                    <TextBlock Style="{StaticResource SettingsDescription}" Text="Sends what's playing or open on this PC to the phone you used last." />
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource SettingsCard}">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Style="{StaticResource SettingsTitle}"><Run FontWeight="SemiBold">Ctrl+Alt+←</Run>  Continue here</TextBlock>
+                                    <TextBlock Style="{StaticResource SettingsDescription}" Text="Brings your phone's current activity to this PC." />
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource SettingsCard}">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Style="{StaticResource SettingsTitle}"><Run FontWeight="SemiBold">Ctrl+Alt+↑</Run>  Choose</TextBlock>
+                                    <TextBlock Style="{StaticResource SettingsDescription}" Text="Opens Baton's panel to pick exactly what to send and where." />
+                                </StackPanel>
+                            </Border>
+                            <Border x:Name="HotkeyWarning" Style="{StaticResource InfoBar}" Margin="0,4,0,0" Visibility="Collapsed">
+                                <TextBlock x:Name="HotkeyWarningText" Style="{StaticResource BodyText}" />
+                            </Border>
+
+                            <TextBlock Text="Browser" Style="{StaticResource SettingsGroupHeader}" Margin="0,24,0,8" />
+                            <Border Style="{StaticResource SettingsCard}">
+                                <StackPanel>
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" Content="Open extension folder" VerticalAlignment="Center" Click="ExtensionFolder_Click" />
+                                        <TextBlock Text="&#xE774;" Style="{StaticResource IconGlyph}" FontSize="20" Margin="4,0,18,0" />
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Baton browser extension" Style="{StaticResource SettingsTitle}" />
+                                            <TextBlock x:Name="ExtensionStatus" Style="{StaticResource SettingsDescription}" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                    <TextBlock Style="{StaticResource SettingsDescription}" Margin="42,10,0,0">
+                                        Gives exact links and positions for videos and pages in Chrome, Edge and Opera. To add it: open
+                                        <Run FontWeight="SemiBold">edge://extensions</Run> or <Run FontWeight="SemiBold">chrome://extensions</Run>,
+                                        turn on Developer mode, choose <Run FontWeight="SemiBold">Load unpacked</Run> and pick the extension folder.
+                                    </TextBlock>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="App choices" Style="{StaticResource SettingsGroupHeader}" Margin="0,24,0,8" />
+                            <Border Style="{StaticResource SettingsCard}">
+                                <StackPanel>
+                                    <TextBlock x:Name="AppChoicesEmpty" Style="{StaticResource SettingsDescription}"
+                                               Text="The first time you continue an app, Baton asks where it should open and remembers it here." TextWrapping="Wrap" />
+                                    <ItemsControl x:Name="AppChoicesList" Focusable="False">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <DockPanel Margin="0,4">
+                                                    <Button DockPanel.Dock="Right" Content="Forget" VerticalAlignment="Center" Tag="{Binding Key}" Click="ForgetChoice_Click" />
+                                                    <StackPanel VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding SourceName}" Style="{StaticResource SettingsTitle}" />
+                                                        <TextBlock Text="{Binding Description}" Style="{StaticResource SettingsDescription}" />
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="General" Style="{StaticResource SettingsGroupHeader}" Margin="0,24,0,8" />
+                            <Border Style="{StaticResource SettingsCard}">
+                                <CheckBox x:Name="StartupToggle" Style="{StaticResource ToggleSwitch}" Click="StartupToggle_Click">
+                                    <StackPanel>
+                                        <TextBlock Text="Start Baton with Windows" Style="{StaticResource SettingsTitle}" />
+                                        <TextBlock Text="Keeps your phones connected in the background, from the notification area." Style="{StaticResource SettingsDescription}" />
+                                    </StackPanel>
+                                </CheckBox>
+                            </Border>
+                            <Border Style="{StaticResource SettingsCard}">
+                                <CheckBox x:Name="SuggestToggle" Style="{StaticResource ToggleSwitch}" Click="SuggestToggle_Click">
+                                    <StackPanel>
+                                        <TextBlock Text="Offer to continue from my phone" Style="{StaticResource SettingsTitle}" />
+                                        <TextBlock Text="When you come back to this PC, suggest what your phone was just playing or showing." Style="{StaticResource SettingsDescription}" />
+                                    </StackPanel>
+                                </CheckBox>
+                            </Border>
+
+                            <TextBlock Text="Diagnostics" Style="{StaticResource SettingsGroupHeader}" Margin="0,24,0,8" />
+                            <Border Style="{StaticResource SettingsCard}">
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Content="Copy log" VerticalAlignment="Center" Click="CopyLog_Click" />
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="Connection and handoff log" Style="{StaticResource SettingsTitle}" />
+                                        <TextBlock x:Name="DiagnosticsSummary" Style="{StaticResource SettingsDescription}" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

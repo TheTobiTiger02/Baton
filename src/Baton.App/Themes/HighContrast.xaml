@@ -1,0 +1,50 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <sys:String xmlns:sys="clr-namespace:System;assembly=System.Runtime" x:Key="Theme.Name">HighContrast</sys:String>
+    <!-- Every Fluent token maps to a system colour; no translucency and no Mica in high contrast. -->
+
+    <SolidColorBrush x:Key="SolidBackgroundBrush" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+    <SolidColorBrush x:Key="WindowBrush" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+    <SolidColorBrush x:Key="NavigationBrush" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+    <SolidColorBrush x:Key="LayerBrush" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+    <SolidColorBrush x:Key="LayerStrokeBrush" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+    <SolidColorBrush x:Key="CardFillBrush" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+    <SolidColorBrush x:Key="CardFillSecondaryBrush" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+    <SolidColorBrush x:Key="CardStrokeBrush" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+    <SolidColorBrush x:Key="SurfaceBrush" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+    <SolidColorBrush x:Key="FlyoutBrush" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+    <SolidColorBrush x:Key="FlyoutStrokeBrush" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+    <SolidColorBrush x:Key="SurfaceElevatedBrush" Color="{DynamicResource {x:Static SystemColors.ControlColorKey}}" />
+    <SolidColorBrush x:Key="ControlFillBrush" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+    <SolidColorBrush x:Key="ControlFillHoverBrush" Color="{DynamicResource {x:Static SystemColors.HighlightColorKey}}" />
+    <SolidColorBrush x:Key="ControlFillPressedBrush" Color="{DynamicResource {x:Static SystemColors.HighlightColorKey}}" />
+    <SolidColorBrush x:Key="ControlFillInputBrush" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+    <SolidColorBrush x:Key="SurfaceHoverBrush" Color="{DynamicResource {x:Static SystemColors.HighlightColorKey}}" />
+    <SolidColorBrush x:Key="SurfacePressedBrush" Color="{DynamicResource {x:Static SystemColors.HighlightColorKey}}" />
+    <SolidColorBrush x:Key="StrokeBrush" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+    <SolidColorBrush x:Key="ControlStrokeBrush" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+    <SolidColorBrush x:Key="ControlStrokeBottomBrush" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+    <SolidColorBrush x:Key="StrokeStrongBrush" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+    <SolidColorBrush x:Key="DividerBrush" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+    <SolidColorBrush x:Key="TextTertiaryBrush" Color="{DynamicResource {x:Static SystemColors.GrayTextColorKey}}" />
+    <SolidColorBrush x:Key="TextDisabledBrush" Color="{DynamicResource {x:Static SystemColors.GrayTextColorKey}}" />
+    <SolidColorBrush x:Key="AccentBrush" Color="{DynamicResource {x:Static SystemColors.HighlightColorKey}}" />
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="{DynamicResource {x:Static SystemColors.HighlightColorKey}}" />
+    <SolidColorBrush x:Key="AccentPressedBrush" Color="{DynamicResource {x:Static SystemColors.HighlightColorKey}}" />
+    <SolidColorBrush x:Key="AccentTextBrush" Color="{DynamicResource {x:Static SystemColors.HighlightTextColorKey}}" />
+    <SolidColorBrush x:Key="AccentSubtleBrush" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+    <SolidColorBrush x:Key="SuccessBrush" Color="{DynamicResource {x:Static SystemColors.HighlightColorKey}}" />
+    <SolidColorBrush x:Key="SuccessFillBrush" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+    <SolidColorBrush x:Key="WarningBrush" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+    <SolidColorBrush x:Key="CautionBrush" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+    <SolidColorBrush x:Key="DangerBrush" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+    <SolidColorBrush x:Key="DangerFillBrush" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+    <SolidColorBrush x:Key="InfoFillBrush" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+    <SolidColorBrush x:Key="SmokeBrush" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+    <SolidColorBrush x:Key="CaptionCloseHoverBrush" Color="{DynamicResource {x:Static SystemColors.HighlightColorKey}}" />
+    <SolidColorBrush x:Key="MediaBrush" Color="{DynamicResource {x:Static SystemColors.WindowColorKey}}" />
+    <SolidColorBrush x:Key="ControlElevationBorderBrush" Color="{DynamicResource {x:Static SystemColors.WindowTextColorKey}}" />
+    <SolidColorBrush x:Key="AccentElevationBorderBrush" Color="{DynamicResource {x:Static SystemColors.HighlightTextColorKey}}" />
+</ResourceDictionary>

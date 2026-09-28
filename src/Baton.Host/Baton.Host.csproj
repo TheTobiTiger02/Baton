@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows10.0.22621.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="System.Management" Version="9.0.0" />
+    <InternalsVisibleTo Include="Baton.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Baton.Protocol\Baton.Protocol.csproj" />
+    <ProjectReference Include="..\Baton.Media\Baton.Media.csproj" />
+  </ItemGroup>
+</Project>

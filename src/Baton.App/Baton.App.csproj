@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows10.0.22621.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\Baton.ico</ApplicationIcon>
+    <AssemblyName>Baton</AssemblyName>
+    <RootNamespace>Baton.App</RootNamespace>
+    <Product>Baton</Product>
+    <Description>Continue what you're doing on your other device.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="QRCoder" Version="1.6.0" />
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Baton.Host\Baton.Host.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\browser-extension\**\*" LinkBase="BrowserExtension" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Assets\Baton.ico" />
+    <Resource Include="Assets\Baton.png" />
+  </ItemGroup>
+</Project>

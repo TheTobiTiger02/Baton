@@ -1,0 +1,22 @@
+<Window x:Class="Baton.App.ToastWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Baton" Width="380" SizeToContent="Height" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True" ShowActivated="False" Focusable="False"
+        Style="{StaticResource {x:Type Window}}">
+    <Border x:Name="Card" Margin="12" Background="{DynamicResource FlyoutBrush}" BorderBrush="{DynamicResource FlyoutStrokeBrush}" BorderThickness="1"
+            CornerRadius="8" Effect="{StaticResource FlyoutShadow}" Padding="14,12" MouseLeftButtonUp="Card_Click">
+        <DockPanel>
+            <Grid DockPanel.Dock="Left" Width="32" Height="32" Margin="0,0,12,0" VerticalAlignment="Top">
+                <Ellipse x:Name="Badge" Fill="{DynamicResource AccentSubtleBrush}" />
+                <TextBlock x:Name="Glyph" Style="{StaticResource IconGlyph}" FontSize="15" Foreground="{DynamicResource AccentBrush}" />
+            </Grid>
+            <Button x:Name="ActionButton" DockPanel.Dock="Right" Style="{StaticResource AccentButton}" Margin="12,0,0,0"
+                    VerticalAlignment="Center" Visibility="Collapsed" Click="ActionButton_Click" />
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock x:Name="Heading" FontWeight="SemiBold" />
+                <TextBlock x:Name="Detail" Style="{StaticResource CaptionText}" TextWrapping="Wrap" Margin="0,2,0,0" />
+            </StackPanel>
+        </DockPanel>
+    </Border>
+</Window>
