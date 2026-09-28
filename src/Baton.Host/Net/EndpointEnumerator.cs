@@ -156,8 +156,8 @@ public sealed class EndpointEnumerator(
             return false;
         }
 
-        var value = BitConverter.ToUInt32(address.GetAddressBytes().Reverse().ToArray());
-        var network = BitConverter.ToUInt32(prefix.GetAddressBytes().Reverse().ToArray());
+        var value = BitConverter.ToUInt32(Enumerable.Reverse(address.GetAddressBytes()).ToArray());
+        var network = BitConverter.ToUInt32(Enumerable.Reverse(prefix.GetAddressBytes()).ToArray());
         var mask = length == 0 ? 0u : uint.MaxValue << (32 - length);
         return (value & mask) == (network & mask);
     }

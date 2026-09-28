@@ -165,7 +165,7 @@ public static class DesktopWindows
         }
 
         yield return id;
-        foreach (var segment in id.Split('.', '_').Reverse().Where(segment => segment.Length > 2))
+        foreach (var segment in Enumerable.Reverse(id.Split('.', '_')).Where(segment => segment.Length > 2))
         {
             yield return segment;
         }
