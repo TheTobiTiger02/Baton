@@ -19,6 +19,7 @@ internal static class WindowBackdrop
     private const int DwmwaSystemBackdropType = 38;
     private const int DwmsbtNone = 1;
     private const int DwmsbtMainWindow = 2;
+    private const int DwmsbtTransientWindow = 3;
     private const int DwmwcpRound = 2;
 
     // DWMWA_SYSTEMBACKDROP_TYPE first shipped in Windows 11 22H2.
@@ -39,25 +40,29 @@ internal static class WindowBackdrop
     public static bool SupportsMica =>
         Environment.OSVersion.Version.Build >= MicaMinimumBuild && !ThemeManager.IsHighContrast;
 
-    /// <summary>Call once the window has a handle; the backdrop then tracks theme changes on its own.</summary>
-    public static void Attach(Window window)
+    /// <summary>
+    /// Call once the window has a handle; the backdrop then tracks theme changes on its own.
+    /// <paramref name="transient"/> is for flyouts and notifications: acrylic instead of Mica, as
+    /// Windows' own flyouts have.
+    /// </summary>
+    public static void Attach(Window window, bool transient = false)
     {
-        void Apply(object? sender, EventArgs e) => window.Dispatcher.BeginInvoke(() => ApplyCore(window));
+        void Apply(object? sender, EventArgs e) => window.Dispatcher.BeginInvoke(() => ApplyCore(window, transient));
 
         if (new WindowInteropHelper(window).Handle == IntPtr.Zero)
         {
-            window.SourceInitialized += (_, _) => ApplyCore(window);
+            window.SourceInitialized += (_, _) => ApplyCore(window, transient);
         }
         else
         {
-            ApplyCore(window);
+            ApplyCore(window, transient);
         }
 
         ThemeManager.ThemeChanged += Apply;
         window.Closed += (_, _) => ThemeManager.ThemeChanged -= Apply;
     }
 
-    private static void ApplyCore(Window window)
+    private static void ApplyCore(Window window, bool transient)
     {
         var handle = new WindowInteropHelper(window).Handle;
         if (handle == IntPtr.Zero || HwndSource.FromHwnd(handle) is not { } source)
@@ -87,7 +92,7 @@ internal static class WindowBackdrop
             window.Background = Brushes.Transparent;
             var margins = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
             DwmExtendFrameIntoClientArea(handle, ref margins);
-            var backdrop = DwmsbtMainWindow;
+            var backdrop = transient ? DwmsbtTransientWindow : DwmsbtMainWindow;
             DwmSetWindowAttribute(handle, DwmwaSystemBackdropType, ref backdrop, sizeof(int));
         }
         else
@@ -98,7 +103,7 @@ internal static class WindowBackdrop
                 DwmSetWindowAttribute(handle, DwmwaSystemBackdropType, ref backdrop, sizeof(int));
             }
 
-            window.SetResourceReference(Window.BackgroundProperty, "SolidBackgroundBrush");
+            window.SetResourceReference(Window.BackgroundProperty, transient ? "FlyoutBrush" : "SolidBackgroundBrush");
         }
     }
 }

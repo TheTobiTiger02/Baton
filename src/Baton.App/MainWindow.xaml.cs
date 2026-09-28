@@ -17,8 +17,10 @@ public partial class MainWindow : Window
         DataContext = services.Shell;
         WindowBackdrop.Attach(this);
         StartupToggle.IsChecked = StartupRegistration.IsEnabled;
+        AudioToggle.IsChecked = UserSettings.StreamAudio;
         SuggestToggle.IsChecked = UserSettings.SuggestOnReturn;
         ShowHotkeyProblems();
+        Welcome.Visibility = UserSettings.Welcomed ? Visibility.Collapsed : Visibility.Visible;
         VersionText.Text = $"Baton {services.Updates.CurrentVersion}";
         QualityChoice.SelectedItem = QualityChoice.Items.OfType<ComboBoxItem>()
             .First(item => (string)item.Tag == UserSettings.StreamQuality.ToString());
@@ -42,6 +44,7 @@ public partial class MainWindow : Window
         }).ToArray();
         AppChoicesList.ItemsSource = items;
         AppChoicesEmpty.Visibility = items.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        AppChoicesHint.Visibility = items.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void ForgetChoice_Click(object sender, RoutedEventArgs e)
@@ -111,6 +114,29 @@ public partial class MainWindow : Window
         {
             UserSettings.StreamQuality = quality;
             _services.Host.WindowStreams.Quality = quality;
+        }
+    }
+
+    private void WelcomeSettings_Click(object sender, RoutedEventArgs e) => ShowSettings();
+
+    private void WelcomeDone_Click(object sender, RoutedEventArgs e)
+    {
+        UserSettings.Welcomed = true;
+        Welcome.Visibility = Visibility.Collapsed;
+    }
+
+    private void AudioToggle_Click(object sender, RoutedEventArgs e)
+    {
+        UserSettings.StreamAudio = AudioToggle.IsChecked == true;
+        _services.Host.WindowStreams.StreamAudio = UserSettings.StreamAudio;
+    }
+
+    private void Rename_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is DeviceViewModel phone
+            && TextPrompt.Ask(this, $"Rename {phone.Name}", "Shown on this PC only. Leave empty to use the phone's own name.", phone.Name) is { } name)
+        {
+            _services.Host.DeviceNames.Set(phone.DeviceId, name);
         }
     }
 
@@ -196,6 +222,7 @@ public partial class MainWindow : Window
     {
         StartupRegistration.SetEnabled(StartupToggle.IsChecked == true);
         StartupToggle.IsChecked = StartupRegistration.IsEnabled;
+        AudioToggle.IsChecked = UserSettings.StreamAudio;
     }
 
     private void UpdateExtensionStatus()
@@ -242,6 +269,18 @@ public partial class MainWindow : Window
             ? "Nothing recorded yet."
             : $"Last: {entries[0].Event} at {entries[0].Timestamp.ToLocalTime():t}";
     }
+}
+
+/// <summary>A welcome step's icon, replaced by a tick once the step is done.</summary>
+public sealed class StepGlyphConverter : System.Windows.Data.IValueConverter
+{
+    private const string Done = "";
+
+    public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture) =>
+        value is true ? Done : parameter as string ?? string.Empty;
+
+    public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture) =>
+        throw new NotSupportedException();
 }
 
 public sealed class InverseBoolToVisibilityConverter : System.Windows.Data.IValueConverter

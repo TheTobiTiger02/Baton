@@ -50,6 +50,20 @@ internal static class UserSettings
         }
     }
 
+    /// <summary>The first-run welcome was dismissed.</summary>
+    public static bool Welcomed
+    {
+        get => Read(nameof(Welcomed), false);
+        set => Write(nameof(Welcomed), value);
+    }
+
+    /// <summary>Windows streamed to a phone bring their sound along.</summary>
+    public static bool StreamAudio
+    {
+        get => Read(nameof(StreamAudio), true);
+        set => Write(nameof(StreamAudio), value);
+    }
+
     /// <summary>How much bandwidth streams to a phone may use.</summary>
     public static Baton.Host.Streaming.StreamQuality StreamQuality
     {

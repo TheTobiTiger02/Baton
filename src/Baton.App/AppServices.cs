@@ -35,6 +35,7 @@ internal sealed class AppServices : IDisposable
         Shell.DefaultPhoneId = UserSettings.LastTargetDeviceId;
         Clipboard = new Mirror.ClipboardBridge(Host, app.Dispatcher);
         Host.WindowStreams.Quality = UserSettings.StreamQuality;
+        Host.WindowStreams.StreamAudio = UserSettings.StreamAudio;
         Host.WindowStreams.SessionChanged += (deviceId, title, started) =>
         {
             app.Dispatcher.BeginInvoke(() => Shell.Streaming = started ? title : null);
@@ -348,7 +349,7 @@ internal sealed class AppServices : IDisposable
     public string NameOf(string deviceId) =>
         deviceId == Coordinator.LocalDeviceId
             ? "this PC"
-            : Host.Devices.GetDevice(deviceId)?.DisplayName ?? "your phone";
+            : Host.NameOf(deviceId) ?? "your phone";
 
     public void Quit()
     {

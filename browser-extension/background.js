@@ -61,8 +61,8 @@ chrome.runtime.onStartup.addListener(connect);
 function inject(tabId) {
   // The Zen/Firefox build is Manifest V2, which has no chrome.scripting.
   return chrome.scripting
-    ? chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] })
-    : chrome.tabs.executeScript(tabId, { file: "content.js" });
+    ? chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ["content.js"] })
+    : chrome.tabs.executeScript(tabId, { file: "content.js", allFrames: true });
 }
 
 async function injectIntoOpenTabs() {
@@ -70,13 +70,17 @@ async function injectIntoOpenTabs() {
   for (const tab of open) inject(tab.id).catch(() => {});
 }
 
-/** Asks a tab's page script; a tab without one gets it injected and is asked once more. */
+/**
+ * Asks the page script of the frame playing in a tab (the page itself unless an embedded player
+ * does); a tab without one gets it injected and is asked once more.
+ */
 async function askTab(tabId, message) {
+  const frameId = (tabs.get(tabId) || {}).frameId || 0;
   try {
-    return await chrome.tabs.sendMessage(tabId, message);
+    return await chrome.tabs.sendMessage(tabId, message, { frameId });
   } catch {
     await inject(tabId).catch(() => {});
-    return chrome.tabs.sendMessage(tabId, message).catch(() => null);
+    return chrome.tabs.sendMessage(tabId, message, { frameId }).catch(() => null);
   }
 }
 
@@ -107,7 +111,7 @@ async function report() {
     const isActive = tabId === activeId;
     const mediaRelevant = entry.media && (entry.media.playing || Date.now() - entry.updatedAt < 30 * 60_000);
     if (!mediaRelevant && !isActive) continue;
-    list.push({ tabId, active: isActive, audible: audible.get(tabId) ?? null, url: entry.url, title: entry.pageTitle, media: mediaRelevant ? entry.media : null, updatedAt: entry.updatedAt });
+    list.push({ tabId, active: isActive, audible: audible.get(tabId) ?? null, url: entry.url, title: entry.pageTitle, media: mediaRelevant ? entry.media : null, updatedAt: entry.updatedAt, playingSince: entry.playingSince || null });
   }
   if (activeId !== null && !tabs.has(activeId)) {
     const tab = await chrome.tabs.get(activeId).catch(() => null);
@@ -121,14 +125,27 @@ async function report() {
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message.type === "state" && sender.tab) {
     const previous = tabs.get(sender.tab.id);
-    tabs.set(sender.tab.id, { ...message.state, updatedAt: Date.now() });
-    if (!previous || JSON.stringify(previous.media && { ...previous.media, positionMs: 0 }) !== JSON.stringify(message.state.media && { ...message.state.media, positionMs: 0 }) || previous.url !== message.state.url) {
+    let frameId = sender.frameId || 0;
+    let current = message.state;
+    if (frameId !== 0) {
+      // An embedded player: its media, the tab's own address and title.
+      current = { ...current, url: sender.tab.url, pageTitle: sender.tab.title };
+    } else if (!current.media && previous && previous.frameId && previous.media) {
+      // The page itself has no player but one of its frames does: keep that one.
+      current = { ...previous, url: current.url, pageTitle: current.pageTitle };
+      frameId = previous.frameId;
+    }
+    // When it started playing, not when it last reported: the newest thing started wins.
+    const playing = current.media && current.media.playing;
+    const playingSince = playing ? (previous && previous.playingSince && previous.media && previous.media.playing ? previous.playingSince : Date.now()) : null;
+    tabs.set(sender.tab.id, { ...current, frameId, playingSince, updatedAt: Date.now() });
+    if (!previous || JSON.stringify(previous.media && { ...previous.media, positionMs: 0 }) !== JSON.stringify(current.media && { ...current.media, positionMs: 0 }) || previous.url !== current.url) {
       scheduleReport();
     }
     return;
   }
   if (message.type === "ready" && sender.tab) {
-    applyPendingSeek(sender.tab.id, message.url);
+    applyPendingSeek(sender.tab.id, sender.frameId ? sender.tab.url : message.url, sender.frameId || 0);
     return;
   }
   // From the popup.
@@ -180,8 +197,10 @@ async function onHostMessage(message) {
       let snapshot = null;
       if (tab) {
         snapshot = await askTab(message.tabId, { type: "take", pause: message.pause });
-        snapshot = snapshot || { url: tab.url, pageTitle: tab.title, media: null };
-        tabs.set(message.tabId, { ...snapshot, updatedAt: Date.now() });
+        // An embedded player answers with its frame's address; the tab's is what continues.
+        snapshot = { ...(snapshot || { media: null }), url: tab.url, pageTitle: tab.title };
+        const frameId = (tabs.get(message.tabId) || {}).frameId || 0;
+        tabs.set(message.tabId, { ...snapshot, frameId, playingSince: null, updatedAt: Date.now() });
         // Report the pause at once: the page's next update now matches what is stored, so it
         // wouldn't, and Baton would go on showing this tab as playing.
         scheduleReport(0);
@@ -231,10 +250,10 @@ function sameContent(a, b) {
   }
 }
 
-function applyPendingSeek(tabId, url) {
+function applyPendingSeek(tabId, url, frameId) {
   pendingSeeks = pendingSeeks.filter((p) => p.expiresAt > Date.now());
   const index = pendingSeeks.findIndex((p) => sameContent(p.url, url));
   if (index < 0) return;
   const [seek] = pendingSeeks.splice(index, 1);
-  chrome.tabs.sendMessage(tabId, { type: "seek", positionMs: seek.positionMs, play: true }).catch(() => {});
+  chrome.tabs.sendMessage(tabId, { type: "seek", positionMs: seek.positionMs, play: true }, { frameId }).catch(() => {});
 }

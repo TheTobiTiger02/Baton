@@ -314,6 +314,14 @@ public sealed class MediaSessionSource : IActivitySource, IActivityControl, IDis
         }
 
         _activities.TryGetValue(id, out var previous);
+
+        // Playing since when, not "now" on every read: the newest thing started wins, not
+        // whichever player last reported its position.
+        if (previous is { Playback.Playing: true } && activity.Playback?.Playing == true)
+        {
+            activity = activity with { UpdatedAt = previous.UpdatedAt };
+        }
+
         if (previous is not null && IsSame(previous, activity))
         {
             return false;
@@ -329,6 +337,7 @@ public sealed class MediaSessionSource : IActivitySource, IActivityControl, IDis
         && a.Subtitle == b.Subtitle
         && a.ArtworkJpegBase64 == b.ArtworkJpegBase64
         && a.Playback?.Playing == b.Playback?.Playing
+        && a.Audible == b.Audible
         && a.Playback?.DurationMs == b.Playback?.DurationMs
         && Math.Abs((a.Volume ?? -1) - (b.Volume ?? -1)) < 0.01
 
@@ -396,7 +405,8 @@ public sealed class MediaSessionSource : IActivitySource, IActivityControl, IDis
                 File: shared,
                 Playback: playback,
                 Window: new ActivityWindow(DesktopWindows.Token(window.Handle), window.ProcessName),
-                Volume: VolumeOf(window.ProcessName));
+                Volume: VolumeOf(window.ProcessName),
+                Audible: AppVolume.Audible(window.ProcessName));
         }
 
         return new Activity(
@@ -416,7 +426,8 @@ public sealed class MediaSessionSource : IActivitySource, IActivityControl, IDis
             }, Query: query),
             Playback: playback,
             Window: window is null ? null : new ActivityWindow(DesktopWindows.Token(window.Handle), window.ProcessName),
-            Volume: window is null ? null : VolumeOf(window.ProcessName));
+            Volume: window is null ? null : VolumeOf(window.ProcessName),
+            Audible: window is null ? null : AppVolume.Audible(window.ProcessName));
     }
 
     /// <summary>Window lookups walk every top-level window, so each app's answer is kept briefly.</summary>

@@ -70,6 +70,7 @@ public sealed class HandoffCoordinator
             ScheduleBroadcast();
         };
         host.Devices.Changed += ScheduleBroadcast;
+        host.DeviceNames.Changed += ScheduleBroadcast;
         RefreshLocal();
     }
 
@@ -184,7 +185,7 @@ public sealed class HandoffCoordinator
             var list = online && _phoneActivities.TryGetValue(phone.DeviceId, out var payload) ? payload : null;
             devices.Add(new DeviceView(
                 phone.DeviceId,
-                phone.DisplayName,
+                _host.DeviceNames.Get(phone.DeviceId) ?? phone.DisplayName,
                 DeviceKinds.Phone,
                 online,
                 list?.Presence ?? PresenceState.Idle,

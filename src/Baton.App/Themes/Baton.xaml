@@ -5,6 +5,7 @@
     <!-- Baton's own building blocks on top of the ported Fluent styles. -->
 
     <app:InverseBoolToVisibilityConverter x:Key="InverseBoolToVis" />
+    <app:StepGlyphConverter x:Key="StepGlyph" />
 
     <LinearGradientBrush x:Key="BrandGradient" StartPoint="0,0" EndPoint="1,1">
         <GradientStop Offset="0" Color="#FF2563EB" />
@@ -19,7 +20,7 @@
 
     <!-- One action: the accent button, a plain button, or an icon for media controls. -->
     <DataTemplate x:Key="ActionItem" DataType="{x:Type app:ActivityAction}">
-        <Button x:Name="Action" Command="{Binding Command}" Margin="0,0,8,0" Padding="12,5,14,6">
+        <Button x:Name="Action" Command="{Binding Command}" Margin="0,0,8,0">
             <StackPanel Orientation="Horizontal">
                 <TextBlock x:Name="Glyph" Text="{Binding Glyph}" Style="{StaticResource IconGlyph}" FontSize="14" Margin="0,0,8,0" />
                 <TextBlock x:Name="Label" Text="{Binding Label}" />

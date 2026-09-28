@@ -7,6 +7,9 @@
 
   let media = null;
   let lastSent = "";
+  // Embedded players (a video inside an iframe) run their own copy of this script; a frame
+  // without one stays quiet, so the page's own state is never overwritten by an empty frame.
+  const inFrame = window !== window.top;
 
   /** The element that matters: the one playing, else the largest one with a duration. */
   function mainMedia() {
@@ -56,6 +59,7 @@
 
   function report(force) {
     const current = state();
+    if (inFrame && !current.media && !lastSent.includes('"media":{')) return;
     // Positions advance on their own; only report changes a viewer would notice.
     const key = JSON.stringify({ ...current, media: current.media && { ...current.media, positionMs: Math.round(current.media.positionMs / 5000) } });
     if (!force && key === lastSent) return;
@@ -148,6 +152,7 @@
   document.addEventListener("playing", enforce, true);
 
   chrome.runtime.onMessage.addListener((message, _sender, reply) => {
+    if (inFrame && !media) return;
     if (message.type === "take") {
       // Paused first, so the snapshot says whether it really stopped, at the second it stopped.
       if (message.pause && media && !media.paused) media.pause();

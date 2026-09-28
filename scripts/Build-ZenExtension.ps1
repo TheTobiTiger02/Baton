@@ -30,7 +30,7 @@ $manifest = [ordered]@{
     browser_specific_settings = @{ gecko = @{ id = 'baton@baton.dev'; strict_min_version = '115.0' } }
     permissions = @('tabs', 'contextMenus', 'alarms', '<all_urls>')
     background = @{ scripts = @('config.js', 'background.js'); persistent = $true }
-    content_scripts = @(@{ matches = @('http://*/*', 'https://*/*'); js = @('content.js'); run_at = 'document_idle' })
+    content_scripts = @(@{ matches = @('http://*/*', 'https://*/*'); js = @('content.js'); all_frames = $true; run_at = 'document_idle' })
     browser_action = @{ default_popup = 'popup.html'; default_title = $chromium.action.default_title; default_icon = $chromium.action.default_icon }
     icons = $chromium.icons
 }

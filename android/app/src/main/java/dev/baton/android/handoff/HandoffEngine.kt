@@ -348,6 +348,8 @@ object HandoffEngine {
     }
 
     private fun take(activity: Activity): Activity {
+        // A page sent from the browser: whatever the browser plays (a video in that page) stops too.
+        if (activity.kind == ActivityKind.WebPage) MediaSessions.pause(activity.app.id)
         val playback = activity.playback ?: return activity
         val now = System.currentTimeMillis()
         when (activity.kind) {

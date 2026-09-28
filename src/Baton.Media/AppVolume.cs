@@ -16,6 +16,46 @@ public static class AppVolume
         return volume;
     }
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> LastHeard = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether the app makes sound: true when its meter moved in the last few seconds (a quiet
+    /// scene is still being watched), false when it is muted or at zero volume, null when unknown.
+    /// </summary>
+    public static bool? Audible(string processName)
+    {
+        var sessions = 0;
+        var silenced = 0;
+        var peak = 0f;
+        Visit(processName, control =>
+        {
+            sessions++;
+            if ((control.GetMute(out var muted) == 0 && muted) || (control.GetMasterVolume(out var level) == 0 && level <= 0))
+            {
+                silenced++;
+                return;
+            }
+
+            if (control is IAudioMeterInformation meter && meter.GetPeakValue(out var value) == 0)
+            {
+                peak = Math.Max(peak, value);
+            }
+        });
+
+        var now = DateTime.UtcNow;
+        if (peak > 0.001f)
+        {
+            LastHeard[processName] = now;
+        }
+
+        if (LastHeard.TryGetValue(processName, out var heard) && now - heard < TimeSpan.FromSeconds(5))
+        {
+            return true;
+        }
+
+        return sessions > 0 && silenced == sessions ? false : null;
+    }
+
     /// <summary>Sets every audio session of the app; false when it has none.</summary>
     public static bool Set(string processName, double volume)
     {
@@ -148,6 +188,12 @@ public static class AppVolume
         [PreserveSig] int GetSessionIdentifier(out IntPtr id);
         [PreserveSig] int GetSessionInstanceIdentifier(out IntPtr id);
         [PreserveSig] int GetProcessId(out uint processId);
+    }
+
+    [ComImport, Guid("C02216F6-8C67-4B5B-9D00-D008E73E0064"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IAudioMeterInformation
+    {
+        [PreserveSig] int GetPeakValue(out float peak);
     }
 
     [ComImport, Guid("87CE5498-68D6-44E5-9215-6DA47EF883D8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

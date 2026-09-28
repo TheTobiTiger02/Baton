@@ -8,12 +8,16 @@ namespace Baton.App;
 public partial class FlyoutWindow : Window
 {
     private const int MaxLocalItems = 3;
+
+    /// <summary>Space to the screen edge and taskbar, as Windows' own flyouts keep.</summary>
+    private const double Gap = 12;
     private readonly AppServices _services;
 
     internal FlyoutWindow(AppServices services)
     {
         _services = services;
         InitializeComponent();
+        WindowBackdrop.Attach(this, transient: true);
         DataContext = services.Shell;
         services.Shell.Local.Activities.CollectionChanged += (_, _) => RefreshLocal();
         RefreshLocal();
@@ -30,8 +34,8 @@ public partial class FlyoutWindow : Window
         Show();
         UpdateLayout();
         var area = SystemParameters.WorkArea;
-        Left = area.Right - ActualWidth;
-        Top = area.Bottom - ActualHeight;
+        Left = area.Right - ActualWidth - Gap;
+        Top = area.Bottom - ActualHeight - Gap;
         Activate();
     }
 

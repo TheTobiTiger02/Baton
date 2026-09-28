@@ -17,6 +17,9 @@ namespace Baton.Host.Streaming;
 public sealed class WindowStreamService : IDisposable
 {
     public const int MaxLongEdge = 1920;
+
+    /// <summary>Tablets (screens wider than a phone's, under 1.8:1) get their full resolution, up to this.</summary>
+    public const int MaxTabletLongEdge = 2560;
     private static readonly TimeSpan MinFrameInterval = TimeSpan.FromMilliseconds(15);
 
     private readonly MediaChannelHub _channels;
@@ -42,6 +45,13 @@ public sealed class WindowStreamService : IDisposable
                 session.FellBehind();
             }
         };
+        channels.RoundTrip += (deviceId, time) =>
+        {
+            if (_sessions.TryGetValue(deviceId, out var session))
+            {
+                session.MeasuredRoundTrip(time);
+            }
+        };
         channels.ChannelChanged += (deviceId, open) =>
         {
             if (!open && _sessions.TryGetValue(deviceId, out var session))
@@ -53,6 +63,9 @@ public sealed class WindowStreamService : IDisposable
 
     /// <summary>A stream to a phone (device id) started (true) or ended (false), with the window's title. Any thread.</summary>
     public event Action<string, string, bool>? SessionChanged;
+
+    /// <summary>Send the window's sound along with its picture; read when each stream starts.</summary>
+    public bool StreamAudio { get; set; } = true;
 
     /// <summary>How much bandwidth streams may use; read when each stream starts.</summary>
     public StreamQuality Quality { get; set; } = StreamQuality.Auto;
@@ -178,12 +191,16 @@ public sealed class WindowStreamService : IDisposable
         return (Math.Max(64, (int)(width * scale) & ~1), Math.Max(64, (int)(height * scale) & ~1));
     }
 
-    /// <summary>The phone's screen (natural orientation), turned and capped at 1920 on the long edge.</summary>
+    /// <summary>
+    /// The phone's screen (natural orientation), turned and capped at 1920 on the long edge; a
+    /// tablet's at 2560, since its screen is large enough to show the difference.
+    /// </summary>
     public static (int Width, int Height) OutputSize((int Width, int Height) screen, bool landscape)
     {
         var shortEdge = Math.Min(screen.Width, screen.Height);
         var longEdge = Math.Max(screen.Width, screen.Height);
-        var scale = Math.Min(1.0, (double)MaxLongEdge / longEdge);
+        var tablet = (double)longEdge / Math.Max(1, shortEdge) < 1.8;
+        var scale = Math.Min(1.0, (double)(tablet ? MaxTabletLongEdge : MaxLongEdge) / longEdge);
         var s = Math.Max(64, (int)(shortEdge * scale) & ~1);
         var l = Math.Max(64, (int)(longEdge * scale) & ~1);
         return landscape ? (l, s) : (s, l);
@@ -279,6 +296,10 @@ public sealed class WindowStreamService : IDisposable
         private byte[]? _savedPlacement;
         private bool _keyframeSent;
         private int _width = width, _height = height;
+        private (int Width, int Height) _full = (width, height);
+        private TimeSpan _lastProbe;
+        private static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(2);
+        private static readonly TimeSpan SlowRoundTrip = TimeSpan.FromMilliseconds(300);
         private int _stopped;
         private readonly BitrateLadder _bitrate = new(owner.Quality, owner._channels.IsRemote(deviceId), DateTimeOffset.UtcNow);
 
@@ -307,7 +328,10 @@ public sealed class WindowStreamService : IDisposable
                 _idleRefresh = new Timer(_ => RepeatLastFrame(), null, 100, 100);
                 owner._timeline.Mark(SessionId, "stream started");
                 owner.SessionChanged?.Invoke(deviceId, title, true);
-                StartAudio();
+                if (owner.StreamAudio)
+                {
+                    StartAudio();
+                }
             }
             catch (Exception ex)
             {
@@ -374,19 +398,37 @@ public sealed class WindowStreamService : IDisposable
                 {
                     _pipeline?.Encoder.SetBitrate(lower);
                     owner._diagnostics.Record(DiagnosticsCategory.Stream, "bitrate.down", $"{lower / 1_000_000.0:0.#} Mbps", deviceId);
+                    Resize(_full);
                 }
             }
         }
 
-        /// <summary>After a while without drops, try more again.</summary>
+        /// <summary>A slow echo means the link is filling up: step down before frames have to be dropped.</summary>
+        public void MeasuredRoundTrip(TimeSpan time)
+        {
+            if (time > SlowRoundTrip)
+            {
+                FellBehind();
+            }
+        }
+
+        /// <summary>After a while without drops, try more again; probe the link every couple of seconds.</summary>
         private void AdaptBitrate()
         {
+            var now = _clock.Elapsed;
+            if (now - _lastProbe > ProbeInterval)
+            {
+                _lastProbe = now;
+                owner._channels.Probe(deviceId);
+            }
+
             lock (_gate)
             {
                 if (_bitrate.Tick(DateTimeOffset.UtcNow) is { } higher)
                 {
                     _pipeline?.Encoder.SetBitrate(higher);
                     owner._diagnostics.Record(DiagnosticsCategory.Stream, "bitrate.up", $"{higher / 1_000_000.0:0.#} Mbps", deviceId);
+                    Resize(_full);
                 }
             }
         }
@@ -593,16 +635,25 @@ public sealed class WindowStreamService : IDisposable
                 return;
             }
 
-            var (w, h) = OutputSize(screen, landscape);
+            Resize(OutputSize(screen, landscape));
+        }
+
+        /// <summary>Streams at a new frame size: turned, or scaled for the bitrate (the viewer is told first).</summary>
+        private void Resize((int Width, int Height) full)
+        {
+            var (w, h) = _bitrate.Reduced ? BitrateLadder.Reduce(full) : full;
             if (w == _width && h == _height)
             {
                 return;
             }
 
+            // Only a turn changes the shape the window is fitted to; a smaller size keeps it.
+            var turned = (w >= h) != (_width >= _height);
+            _full = full;
             _width = w;
             _height = h;
             var wasFitted = _savedPlacement is not null;
-            if (wasFitted)
+            if (wasFitted && turned)
             {
                 SetFit(false, restart: false);
                 SetFit(true, restart: false);

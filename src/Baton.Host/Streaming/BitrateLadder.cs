@@ -36,6 +36,18 @@ public sealed class BitrateLadder
 
     public int Bitrate => Steps[_step];
 
+    /// <summary>Below this the picture is sent at 720p: fewer, sharper pixels beat many blurry ones.</summary>
+    public const int ReducedBelow = 3_000_000;
+
+    public bool Reduced => Bitrate < ReducedBelow;
+
+    /// <summary>A frame size scaled down to 1280 on its long edge (unchanged when already smaller).</summary>
+    public static (int Width, int Height) Reduce((int Width, int Height) size)
+    {
+        var scale = Math.Min(1.0, 1280.0 / Math.Max(size.Width, size.Height));
+        return (Math.Max(64, (int)(size.Width * scale) & ~1), Math.Max(64, (int)(size.Height * scale) & ~1));
+    }
+
     /// <summary>Video was dropped. Returns the new bitrate when it went down.</summary>
     public int? Dropped(DateTimeOffset now)
     {

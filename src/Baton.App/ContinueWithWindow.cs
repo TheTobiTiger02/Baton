@@ -22,8 +22,8 @@ internal sealed class ContinueWithWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Topmost = true;
         MinWidth = 380;
-        SetResourceReference(BackgroundProperty, "SolidBackgroundBrush");
         SetResourceReference(ForegroundProperty, "TextPrimaryBrush");
+        WindowBackdrop.Attach(this);
 
         var panel = new StackPanel { Margin = new Thickness(24) };
         panel.Children.Add(new TextBlock { Text = $"Continue {title}", FontSize = 18, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 420 });

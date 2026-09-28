@@ -29,6 +29,20 @@ public sealed class MediaChannelHub(StreamTicketStore tickets, DiagnosticsLog di
     /// <summary>The phone fell behind and dropped video; the stream should send a keyframe soon.</summary>
     public event Action<string>? KeyframeNeeded;
 
+    /// <summary>A <see cref="Probe"/> came back: how long the round trip through the queue and the link took.</summary>
+    public event Action<string, TimeSpan>? RoundTrip;
+
+    /// <summary>
+    /// Sends a timestamp the phone echoes back (on the keep-alive channel, which older phones
+    /// ignore). It queues behind any video, so the round trip grows as the link falls behind.
+    /// </summary>
+    public void Probe(string deviceId)
+    {
+        var stamp = new byte[8];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(stamp, System.Diagnostics.Stopwatch.GetTimestamp());
+        Send(deviceId, StreamChannel.KeepAlive, StreamRecordFlags.None, 0, stamp);
+    }
+
     public bool IsOpen(string deviceId) => _channels.ContainsKey(deviceId);
 
     /// <summary>The phone's channel comes over Tailscale rather than the home network.</summary>
@@ -61,6 +75,11 @@ public sealed class MediaChannelHub(StreamTicketStore tickets, DiagnosticsLog di
                 if (record.Header.Channel != StreamChannel.KeepAlive)
                 {
                     RecordReceived?.Invoke(connection.DeviceId, record.Header, record.Payload);
+                }
+                else if (record.Payload.Length == 8)
+                {
+                    var sent = System.Buffers.Binary.BinaryPrimitives.ReadInt64BigEndian(record.Payload);
+                    RoundTrip?.Invoke(connection.DeviceId, System.Diagnostics.Stopwatch.GetElapsedTime(sent));
                 }
             }
         }

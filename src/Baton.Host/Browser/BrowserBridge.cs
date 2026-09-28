@@ -395,14 +395,18 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
             media is null ? ActivityKind.WebPage : ActivityKind.WebMedia,
             (media?.Title ?? tab.Title ?? tab.Url).Trim(),
             new ActivityApp(connection.Browser, connection.Browser.ToLowerInvariant()),
-            media?.Playing == true ? DateTimeOffset.UtcNow : updatedAt,
+            // Since it started playing (older extensions don't say: then now).
+            media?.Playing == true
+                ? tab.PlayingSince is { } since ? DateTimeOffset.FromUnixTimeMilliseconds(since) : DateTimeOffset.UtcNow
+                : updatedAt,
             Subtitle: media?.Artist ?? host,
             ArtworkJpegBase64: media?.Artwork is { } art && _artwork.TryGetValue(art, out var jpeg) ? jpeg : null,
             Url: tab.Url,
             Content: new ActivityContent(provider, contentId, media?.Title ?? tab.Title),
             Playback: media is null ? null : new Playback(media.PositionMs, media.DurationMs, media.Playing, media.Rate <= 0 ? 1 : media.Rate, updatedAt),
             Volume: media?.Volume,
-            Audible: media is null ? null : tab.Audible,
+            // A player muted in the page is silent even when the tab isn't.
+            Audible: media is null ? null : media.Volume == 0 ? false : tab.Audible,
             // The active tab of the browser window the user was last in.
             Focused: tab.Active);
     }
@@ -532,7 +536,8 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
         public bool ConfirmsResume { get; set; }
     }
 
-    public sealed record TabState(int TabId, bool Active, string Url, string? Title, MediaState? Media, long UpdatedAt, bool? Audible = null);
+    public sealed record TabState(int TabId, bool Active, string Url, string? Title, MediaState? Media, long UpdatedAt, bool? Audible = null,
+        long? PlayingSince = null);
 
     public sealed record MediaState(string? Title, string? Artist, string? Artwork, long PositionMs, long DurationMs, bool Playing, double Rate, bool Live, double? Volume = null);
 }

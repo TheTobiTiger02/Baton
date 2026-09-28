@@ -83,15 +83,49 @@
                                 or <Run FontWeight="SemiBold" Text="{Binding ContinueHotkey, Mode=OneWay}" /> to bring your phone's activity here.
                             </TextBlock>
 
-                            <Border Style="{StaticResource InfoBar}" Margin="0,0,0,24"
-                                    Visibility="{Binding HasPhones, Converter={StaticResource InverseBoolToVis}}">
-                                <DockPanel>
-                                    <Button DockPanel.Dock="Right" Content="Pair a phone" Style="{StaticResource AccentButton}" Click="Pair_Click" />
-                                    <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                                        <TextBlock Text="Pair your phone to get started" FontWeight="SemiBold" />
-                                        <TextBlock Text="Install Baton on your Android phone, then scan the code Baton shows here." Style="{StaticResource CaptionText}" />
-                                    </StackPanel>
-                                </DockPanel>
+                            <!-- First run: the three things that make Baton useful, until dismissed. -->
+                            <Border x:Name="Welcome" Style="{StaticResource PageCard}" Padding="20" Margin="0,0,0,24" Visibility="Collapsed">
+                                <StackPanel>
+                                    <TextBlock Text="Welcome to Baton" Style="{StaticResource SectionTitle}" />
+                                    <TextBlock Style="{StaticResource CaptionText}" Margin="0,2,0,16" TextWrapping="Wrap"
+                                               Text="Three steps and your PC and phone hand things to each other." />
+
+                                    <DockPanel Margin="0,0,0,14">
+                                        <Button DockPanel.Dock="Right" Content="Pair a phone" Style="{StaticResource AccentButton}" VerticalAlignment="Center" Click="Pair_Click" />
+                                        <TextBlock DockPanel.Dock="Left" Style="{StaticResource IconGlyph}" FontSize="18" Width="28" VerticalAlignment="Top" Margin="0,2,12,0"
+                                                   Text="{Binding HasPhones, Converter={StaticResource StepGlyph}, ConverterParameter=&#xE8EA;}" Foreground="{DynamicResource AccentBrush}" />
+                                        <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                            <TextBlock Text="Pair your phone" FontWeight="SemiBold" />
+                                            <TextBlock Style="{StaticResource CaptionText}" TextWrapping="Wrap"
+                                                       Text="The pairing window also shows a code that downloads Baton for Android." />
+                                        </StackPanel>
+                                    </DockPanel>
+
+                                    <DockPanel Margin="0,0,0,14">
+                                        <Button DockPanel.Dock="Right" Content="Change" VerticalAlignment="Center" Click="WelcomeSettings_Click" />
+                                        <TextBlock DockPanel.Dock="Left" Style="{StaticResource IconGlyph}" FontSize="18" Width="28" VerticalAlignment="Top" Margin="0,2,12,0"
+                                                   Text="&#xE765;" Foreground="{DynamicResource AccentBrush}" />
+                                        <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                            <TextBlock Text="Use the shortcuts" FontWeight="SemiBold" />
+                                            <TextBlock Style="{StaticResource CaptionText}" TextWrapping="Wrap">
+                                                <Run Text="{Binding SendHotkey, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=" sends what you're doing to your phone, " /><Run Text="{Binding ContinueHotkey, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=" brings your phone's here." />
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </DockPanel>
+
+                                    <DockPanel Margin="0,0,0,18">
+                                        <Button DockPanel.Dock="Right" Content="How to add it" VerticalAlignment="Center" Click="WelcomeSettings_Click" />
+                                        <TextBlock DockPanel.Dock="Left" Style="{StaticResource IconGlyph}" FontSize="18" Width="28" VerticalAlignment="Top" Margin="0,2,12,0"
+                                                   Text="&#xE774;" Foreground="{DynamicResource AccentBrush}" />
+                                        <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                            <TextBlock Text="Add the browser extension (optional)" FontWeight="SemiBold" />
+                                            <TextBlock Style="{StaticResource CaptionText}" TextWrapping="Wrap"
+                                                       Text="Videos and pages from your browser then continue in the same tab, right to the second." />
+                                        </StackPanel>
+                                    </DockPanel>
+
+                                    <Button Content="Done" HorizontalAlignment="Left" MinWidth="100" Click="WelcomeDone_Click" />
+                                </StackPanel>
                             </Border>
 
                             <Border Style="{StaticResource InfoBar}" Margin="0,0,0,16" Background="{DynamicResource AccentSubtleBrush}"
@@ -149,6 +183,7 @@
                                         <Border Style="{StaticResource SettingsCard}">
                                             <DockPanel>
                                                 <Button DockPanel.Dock="Right" Content="Forget" VerticalAlignment="Center" Click="Forget_Click" Tag="{Binding}" Margin="8,0,0,0" />
+                                                <Button DockPanel.Dock="Right" Content="Rename" VerticalAlignment="Center" Click="Rename_Click" Tag="{Binding}" Margin="8,0,0,0" />
                                                 <Button DockPanel.Dock="Right" Content="Make default" VerticalAlignment="Center" Click="MakeDefault_Click" Tag="{Binding}"
                                                         ToolTip="The phone the send shortcut and the first button on each card go to."
                                                         Visibility="{Binding IsDefault, Converter={StaticResource InverseBoolToVis}}" />
@@ -247,11 +282,22 @@
                                 </DockPanel>
                             </Border>
 
+                            <Border Style="{StaticResource SettingsCard}">
+                                <CheckBox x:Name="AudioToggle" Style="{StaticResource ToggleSwitch}" Click="AudioToggle_Click">
+                                    <StackPanel>
+                                        <TextBlock Text="Stream sound" Style="{StaticResource SettingsTitle}" />
+                                        <TextBlock Text="A window streamed to your phone plays its sound there too." Style="{StaticResource SettingsDescription}" />
+                                    </StackPanel>
+                                </CheckBox>
+                            </Border>
+
                             <TextBlock Text="App choices" Style="{StaticResource SettingsGroupHeader}" Margin="0,24,0,8" />
                             <Border Style="{StaticResource SettingsCard}">
                                 <StackPanel>
                                     <TextBlock x:Name="AppChoicesEmpty" Style="{StaticResource SettingsDescription}"
                                                Text="The first time you continue an app, Baton asks where it should open and remembers it here." TextWrapping="Wrap" />
+                                    <TextBlock x:Name="AppChoicesHint" Style="{StaticResource SettingsDescription}" Margin="0,0,0,8" TextWrapping="Wrap"
+                                               Text="To pick a different app, use Choose app… in a card's ⋯ menu. Forget goes back to asking or the best way." />
                                     <ItemsControl x:Name="AppChoicesList" Focusable="False">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>

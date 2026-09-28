@@ -3,9 +3,12 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:app="clr-namespace:Baton.App"
         xmlns:controls="clr-namespace:Baton.App.Controls"
-        Title="Baton" Width="400" SizeToContent="Height" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Title="Baton" Width="400" SizeToContent="Height" WindowStyle="None"
         ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True" Style="{StaticResource {x:Type Window}}"
         Deactivated="Window_Deactivated" PreviewKeyDown="Window_PreviewKeyDown">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="0" ResizeBorderThickness="0" GlassFrameThickness="-1" CornerRadius="0" UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
     <Window.Resources>
         <DataTemplate x:Key="CompactActivity" DataType="{x:Type app:ActivityViewModel}">
             <Border Background="{DynamicResource CardFillBrush}" BorderBrush="{DynamicResource CardStrokeBrush}" BorderThickness="1"
@@ -45,8 +48,7 @@
         </DataTemplate>
     </Window.Resources>
 
-    <Border Margin="12" Background="{DynamicResource FlyoutBrush}" BorderBrush="{DynamicResource FlyoutStrokeBrush}" BorderThickness="1"
-            CornerRadius="8" Effect="{StaticResource FlyoutShadow}">
+    <Border Background="Transparent">
         <StackPanel Margin="16,12,16,16">
             <DockPanel Margin="0,0,0,12">
                 <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" Content="&#xE713;" ToolTip="Open Baton" Click="Open_Click" />

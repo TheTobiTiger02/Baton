@@ -15,6 +15,7 @@ public partial class ToastWindow : Window
     public ToastWindow()
     {
         InitializeComponent();
+        WindowBackdrop.Attach(this, transient: true);
         _hide = new DispatcherTimer(TimeSpan.FromSeconds(5), DispatcherPriority.Normal, (_, _) => HideNow(), Dispatcher);
         _hide.Stop();
     }
@@ -72,8 +73,8 @@ public partial class ToastWindow : Window
         base.Show();
         UpdateLayout();
         var area = SystemParameters.WorkArea;
-        Left = area.Right - ActualWidth;
-        Top = area.Bottom - ActualHeight;
+        Left = area.Right - ActualWidth - 12;
+        Top = area.Bottom - ActualHeight - 12;
         _hide.Stop();
         _hide.Interval = duration;
         _hide.Start();

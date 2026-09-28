@@ -134,6 +134,8 @@ object MediaChannel {
                     videoSink?.onRecord(header, payload)
                 }
                 StreamProtocol.CHANNEL_AUDIO -> audioSink?.onRecord(header, payload)
+                // The PC's round-trip probe: straight back, so it can measure the link.
+                StreamProtocol.CHANNEL_KEEPALIVE -> if (payload.isNotEmpty()) send(StreamProtocol.CHANNEL_KEEPALIVE, payload)
                 // The PC's clipboard applies to whichever session is running; other input goes to it.
                 StreamProtocol.CHANNEL_CONTROL -> if (payload.firstOrNull()?.toInt() == ControlMessageCodec.TYPE_CLIPBOARD) {
                     (runCatching { ControlMessageCodec.decode(payload) }.getOrNull() as? ControlMessage.Clipboard)?.let { ClipboardSync.onRemote(it.value) }

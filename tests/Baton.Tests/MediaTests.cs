@@ -71,6 +71,10 @@ public class MediaTests
         Assert.Equal((1920, 860), WindowStreamService.OutputSize((1280, 2856), landscape: true));
         Assert.Equal((860, 1920), WindowStreamService.OutputSize((1280, 2856), landscape: false));
         Assert.Equal((864, 1920), WindowStreamService.OutputSize((1080, 2400), landscape: false));
+
+        // Tablets keep their resolution up to 2560 on the long edge.
+        Assert.Equal((2560, 1600), WindowStreamService.OutputSize((1600, 2560), landscape: true));
+        Assert.Equal((2560, 1846), WindowStreamService.OutputSize((2152, 2984), landscape: true));
     }
 
     [Fact]
@@ -135,5 +139,13 @@ public class BitrateLadderTests
         Assert.True(Baton.Host.Streaming.BitrateLadder.IsRemote(System.Net.IPAddress.Parse("100.101.1.2")));
         Assert.False(Baton.Host.Streaming.BitrateLadder.IsRemote(System.Net.IPAddress.Parse("192.168.178.181")));
         Assert.False(Baton.Host.Streaming.BitrateLadder.IsRemote(System.Net.IPAddress.Parse("100.200.1.2")));
+
+        // The lowest step also sends fewer pixels.
+        var saver = new Baton.Host.Streaming.BitrateLadder(Baton.Host.Streaming.StreamQuality.DataSaver, remote: false, now);
+        Assert.False(saver.Reduced);
+        saver.Dropped(now.AddSeconds(3));
+        Assert.True(saver.Reduced);
+        Assert.Equal((1280, 576), Baton.Host.Streaming.BitrateLadder.Reduce((1920, 864)));
+        Assert.Equal((864, 400), Baton.Host.Streaming.BitrateLadder.Reduce((864, 400)));
     }
 }

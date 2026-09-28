@@ -30,6 +30,7 @@ public sealed class BatonHost : IAsyncDisposable
         StorageDirectory = storageDirectory ?? HostIdentity.DefaultStorageDirectory;
         Identity = HostIdentity.LoadOrCreate(StorageDirectory);
         Devices = new DeviceRegistry(Path.Combine(StorageDirectory, "devices.json"));
+        DeviceNames = new DeviceNames(Path.Combine(StorageDirectory, "device-names.json"));
         Endpoints = new EndpointEnumerator(Sessions, Identity, Diagnostics);
         StreamListener = new StreamListener(Identity, StreamTickets, Diagnostics,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<StreamListener>.Instance);
@@ -42,6 +43,13 @@ public sealed class BatonHost : IAsyncDisposable
     }
 
     public HandoffTimeline Timeline { get; }
+
+    /// <summary>Names given to phones on this PC.</summary>
+    public DeviceNames DeviceNames { get; }
+
+    /// <summary>What to call a phone: the name given here, else the one it reports.</summary>
+    public string? NameOf(string deviceId) =>
+        DeviceNames.Get(deviceId) ?? Devices.GetDevice(deviceId)?.DisplayName;
 
     /// <summary>Each phone's persistent media socket: streams and input in both directions.</summary>
     public MediaChannelHub MediaChannels { get; }

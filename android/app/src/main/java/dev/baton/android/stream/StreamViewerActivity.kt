@@ -252,7 +252,9 @@ class StreamViewerActivity : Activity() {
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 setPadding(dp(4), 0, dp(8), 0)
             }, LinearLayout.LayoutParams(0, WRAP, 1f))
-            modeButton = pill("Touch") { toggleMode() }
+            // The mode used last time comes back: some people always want the trackpad.
+            trackpad = getSharedPreferences("viewer", MODE_PRIVATE).getBoolean("trackpad", false)
+            modeButton = pill(if (trackpad) "Trackpad" else "Touch") { toggleMode() }
             addView(modeButton)
             addView(pill("⌨") { toggleKeyboard() })
             fitButton = pill("Fit") { toggleFit() }
@@ -672,6 +674,7 @@ class StreamViewerActivity : Activity() {
 
     private fun toggleMode() {
         trackpad = !trackpad
+        getSharedPreferences("viewer", MODE_PRIVATE).edit().putBoolean("trackpad", trackpad).apply()
         modeButton.text = if (trackpad) "Trackpad" else "Touch"
         if (!trackpad) {
             zoom = 1f
