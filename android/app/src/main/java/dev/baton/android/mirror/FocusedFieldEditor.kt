@@ -32,8 +32,8 @@ internal class FocusedFieldEditor(private val service: AccessibilityService) {
         if (control) {
             return when (keyCode) {
                 KeyEvent.KEYCODE_A -> select { text, _, _ -> 0 to text.length }
-                KeyEvent.KEYCODE_C -> perform(AccessibilityNodeInfo.ACTION_COPY)
-                KeyEvent.KEYCODE_X -> perform(AccessibilityNodeInfo.ACTION_CUT)
+                KeyEvent.KEYCODE_C -> shareSelection().let { perform(AccessibilityNodeInfo.ACTION_COPY) }
+                KeyEvent.KEYCODE_X -> shareSelection().let { perform(AccessibilityNodeInfo.ACTION_CUT) }
                 else -> false
             }
         }
@@ -65,6 +65,21 @@ internal class FocusedFieldEditor(private val service: AccessibilityService) {
     }
 
     fun paste(): Boolean = perform(AccessibilityNodeInfo.ACTION_PASTE)
+
+    /**
+     * Copying in the mirror: the selection goes to the PC's clipboard too. Read here, before the
+     * copy, because Baton can't read the phone's clipboard while it isn't the app in front.
+     */
+    private fun shareSelection() {
+        val node = focusedField() ?: return
+        try {
+            if (node.isPassword) return
+            val (text, start, end) = currentState(node)
+            if (start < end) dev.baton.android.stream.ClipboardSync.copied(text.substring(start, end))
+        } finally {
+            node.recycleSafely()
+        }
+    }
 
     private data class Edit(val text: String, val caret: Int)
 

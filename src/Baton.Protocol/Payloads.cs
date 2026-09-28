@@ -154,8 +154,13 @@ public sealed record Activity(
     ActivityFile? File = null,
     Playback? Playback = null,
     ActivityWindow? Window = null,
-    double? Volume = null)
+    double? Volume = null,
+    bool? Audible = null,
+    bool? Focused = null)
 {
+    // Audible: it plays with sound right now (a muted autoplay video does not). Focused: it is in
+    // the window (or the browser tab) the user last had in front. Null when the source can't tell.
+
     /// <summary>This activity as a peer or a media session reported it, with its playback made safe to compute with.</summary>
     public Activity Normalized() => Playback is { } playback ? this with { Playback = playback.Normalized() } : this;
 }

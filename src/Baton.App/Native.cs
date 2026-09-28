@@ -64,13 +64,20 @@ internal sealed class HotkeyManager : IDisposable
         return true;
     }
 
-    public void Dispose()
+    /// <summary>Releases every shortcut, before registering a changed set.</summary>
+    public void Clear()
     {
         foreach (var id in _actions.Keys)
         {
             UnregisterHotKey(_window.Handle, id);
         }
 
+        _actions.Clear();
+    }
+
+    public void Dispose()
+    {
+        Clear();
         _window.Dispose();
     }
 

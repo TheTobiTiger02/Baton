@@ -101,6 +101,43 @@ public class ProtocolTests
         var playing = new Activity("playing", "d", ActivityKind.AppMedia, "playing", app, now.AddMinutes(-5), Playback: new Playback(0, 1, true, 1, now));
         Assert.Equal(["playing", "paused", "page"], ActivityRanking.Rank([page, paused, playing], now).Select(a => a.Id));
     }
+
+    [Fact]
+    public void RankingPrefersWhatIsHeardThenWhatIsInFront()
+    {
+        // A muted autoplay video on the second monitor must not beat the video being watched.
+        var now = DateTimeOffset.UtcNow;
+        var app = new ActivityApp("Zen", "zen");
+        Activity Playing(string id, bool? audible, bool? focused, int ageSeconds) =>
+            new(id, "d", ActivityKind.WebMedia, id, app, now.AddSeconds(-ageSeconds),
+                Playback: new Playback(0, 60_000, true, 1, now), Audible: audible, Focused: focused);
+
+        var mutedTwitter = Playing("twitter", audible: false, focused: false, ageSeconds: 0);
+        var youtube = Playing("youtube", audible: true, focused: false, ageSeconds: 30);
+        Assert.Equal("youtube", ActivityRanking.Rank([mutedTwitter, youtube], now)[0].Id);
+
+        var background = Playing("background", audible: null, focused: false, ageSeconds: 0);
+        var inFront = Playing("front", audible: null, focused: true, ageSeconds: 30);
+        Assert.Equal("front", ActivityRanking.Rank([background, inFront], now)[0].Id);
+
+        // Attention only orders within a tier: a paused video is still below anything playing.
+        var paused = new Activity("paused", "d", ActivityKind.WebMedia, "paused", app, now,
+            Playback: new Playback(0, 60_000, false, 1, now), Audible: false, Focused: true);
+        Assert.Equal("twitter", ActivityRanking.Rank([paused, mutedTwitter], now)[0].Id);
+    }
+
+    [Fact]
+    public void AWindowPlayingMediaIsOfferedOnceAsItsMedia()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var player = new ActivityWindow("1a2b", "harbor");
+        var media = new Activity("media", "d", ActivityKind.AppMedia, "Agatha All Along", new ActivityApp("Harbor", "harbor"), now,
+            Playback: new Playback(0, 60_000, true, 1, now), Window: player);
+        var sameWindow = new Activity("window:1a2b", "d", ActivityKind.WindowStream, "Harbor", new ActivityApp("harbor", "harbor"), now, Window: player);
+        var otherWindow = sameWindow with { Id = "window:ffff", Window = new ActivityWindow("ffff", "code") };
+
+        Assert.Equal(["media", "window:ffff"], ActivityRanking.Rank([media, sameWindow, otherWindow], now).Select(activity => activity.Id));
+    }
 }
 
 public class ContentTests

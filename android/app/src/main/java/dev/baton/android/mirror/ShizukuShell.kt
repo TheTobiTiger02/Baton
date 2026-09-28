@@ -1,5 +1,9 @@
 package dev.baton.android.mirror
 
+import android.content.ClipData
+import android.content.ClipDescription
+import android.os.Build
+import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
 import android.view.InputDevice
@@ -81,6 +85,47 @@ class ShizukuShell : IShizukuShell.Stub() {
         return inject(KeyEvent(now, now, action, keyCode, 0, metaState, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, 0, InputDevice.SOURCE_KEYBOARD))
     }
 
+    private val clipboard: Any? by lazy {
+        runCatching {
+            val binder = Class.forName("android.os.ServiceManager").getMethod("getService", String::class.java)
+                .invoke(null, "clipboard") as IBinder
+            Class.forName("android.content.IClipboard\$Stub").getMethod("asInterface", IBinder::class.java).invoke(null, binder)
+        }.onFailure { Log.w(TAG, "No clipboard service", it) }.getOrNull()
+    }
+    private var clipTimestamp = Long.MIN_VALUE
+
+    override fun clipboardText(): String? {
+        // The description is free to read; the clip itself is fetched once per copy, since reading
+        // it may show Android's "pasted from your clipboard" notice.
+        val description = clipboardCall("getPrimaryClipDescription") as? ClipDescription ?: return null
+        if (description.timestamp == clipTimestamp) return null
+        clipTimestamp = description.timestamp
+        val sensitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            description.extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE) == true
+        if (sensitive) return null
+        val clip = clipboardCall("getPrimaryClip") as? ClipData ?: return null
+        return clip.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString()
+    }
+
+    /**
+     * Calls an IClipboard getter as the shell package. Its parameters grew over Android versions
+     * (package; + user; + attribution tag; + device), so they are filled by type.
+     */
+    private fun clipboardCall(name: String): Any? {
+        val service = clipboard ?: return null
+        val method = service.javaClass.methods.firstOrNull { it.name == name } ?: return null
+        val args = method.parameterTypes.mapIndexed { index, type ->
+            when (type) {
+                String::class.java -> if (index == 0) SHELL_PACKAGE else null
+                Int::class.javaPrimitiveType -> 0
+                else -> null
+            }
+        }
+        return runCatching { method.invoke(service, *args.toTypedArray()) }
+            .onFailure { Log.w(TAG, "$name failed", it) }
+            .getOrNull()
+    }
+
     /** Hover-type events (the wheel) are dropped without a display; touches get one assigned. */
     private fun onDefaultDisplay(event: InputEvent) {
         runCatching { InputEvent::class.java.getMethod("setDisplayId", Int::class.javaPrimitiveType).invoke(event, 0) }
@@ -97,5 +142,6 @@ class ShizukuShell : IShizukuShell.Stub() {
         const val TAG = "BatonShizukuShell"
         const val VIRTUAL_DEVICE = -1
         const val INJECT_ASYNC = 0
+        const val SHELL_PACKAGE = "com.android.shell"
     }
 }

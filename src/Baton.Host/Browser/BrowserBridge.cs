@@ -31,6 +31,7 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
 
     private readonly ConcurrentDictionary<string, Connection> _connections = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, TaskCompletionSource<TabState?>> _takes = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _resumes = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string?> _artwork = new(StringComparer.Ordinal);
     private IReadOnlyList<BridgeDevice> _devices = [];
 
@@ -175,14 +176,31 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
         }
 
         var url = videoId is not null ? ContentLinks.WithYouTubeTime(best.Tab.Url, positionMs) : best.Tab.Url;
-        await SendAsync(best.Connection, new { type = "resume", tabId = best.Tab.TabId, positionMs, url });
-        if (Baton.Media.DesktopWindows.MainWindowOf(ProcessOf(best.Connection)) is { } window)
+        var requestId = Guid.NewGuid().ToString("N");
+        var reply = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _resumes[requestId] = reply;
+        bool applied;
+        try
+        {
+            await SendAsync(best.Connection, new { type = "resume", requestId, tabId = best.Tab.TabId, positionMs, url });
+            // Only a tab that confirms the seek (or reloads at the link's time) counts; otherwise the
+            // caller opens the page afresh at the right second. An older extension can't confirm.
+            applied = !best.Connection.ConfirmsResume
+                || await reply.Task.WaitAsync(TakeTimeout).ContinueWith(task => task.IsCompletedSuccessfully && task.Result);
+        }
+        finally
+        {
+            _resumes.TryRemove(requestId, out _);
+        }
+
+        if (applied && Baton.Media.DesktopWindows.MainWindowOf(ProcessOf(best.Connection)) is { } window)
         {
             Baton.Media.DesktopWindows.BringToFront(window.Handle);
         }
 
-        diagnostics.Record(DiagnosticsCategory.Handoff, "resume.tab", $"{best.Connection.Browser} tab {best.Tab.TabId}: {best.Tab.Title}");
-        return true;
+        diagnostics.Record(DiagnosticsCategory.Handoff, applied ? "resume.tab" : "resume.tab.failed",
+            $"{best.Connection.Browser} tab {best.Tab.TabId}: {best.Tab.Title}");
+        return applied;
 
         int Score(TabState tab)
         {
@@ -248,7 +266,16 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
         {
             await SendAsync(connection, new { type = "take", requestId, tabId, pause });
             var tab = await reply.Task.WaitAsync(TakeTimeout, cancellationToken);
-            return tab is null ? null : ToActivity(connection, tab with { TabId = tabId, UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
+            if (tab is null)
+            {
+                return null;
+            }
+
+            tab = tab with { TabId = tabId, UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() };
+            // Known paused here right away, not only when the extension's next report arrives.
+            connection.Tabs = connection.Tabs.Select(known => known.TabId == tabId ? tab with { Active = known.Active, Audible = known.Audible } : known).ToArray();
+            Changed?.Invoke();
+            return ToActivity(connection, tab);
         }
         catch (TimeoutException)
         {
@@ -258,6 +285,26 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
         {
             _takes.TryRemove(requestId, out _);
         }
+    }
+
+    /// <summary>
+    /// Pauses every tab playing media titled <paramref name="title"/>: the fallback when pausing a
+    /// system media session did not take. True when a tab was asked to.
+    /// </summary>
+    public async Task<bool> PauseMatchingAsync(string title)
+    {
+        var asked = false;
+        foreach (var connection in _connections.Values)
+        {
+            foreach (var tab in connection.Tabs.Where(tab => tab.Media is { Playing: true } media
+                         && MediaOpener.TitlesMatch(media.Title ?? tab.Title ?? string.Empty, title)))
+            {
+                await SendAsync(connection, new { type = "command", tabId = tab.TabId, action = MediaActions.Pause });
+                asked = true;
+            }
+        }
+
+        return asked;
     }
 
     /// <summary>Plays, pauses, seeks or sets the volume of a tab's media, through the extension.</summary>
@@ -283,6 +330,8 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
                 connection.Browser = message.GetProperty("browser").GetString() is { } named && named != "Firefox"
                     ? named
                     : connection.Process is { } process ? KnownApps.DisplayName(process) : "Firefox";
+                connection.ConfirmsResume = message.TryGetProperty("version", out var version)
+                    && Version.TryParse(version.GetString(), out var parsed) && parsed >= new Version(0, 1, 2);
                 diagnostics.Record(DiagnosticsCategory.Media, "browser.connected", connection.Browser);
                 break;
             case "tabs":
@@ -294,6 +343,16 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
 
                 Changed?.Invoke();
                 break;
+            case "resumed":
+            {
+                var requestId = message.GetProperty("requestId").GetString() ?? string.Empty;
+                if (_resumes.TryGetValue(requestId, out var resumed))
+                {
+                    resumed.TrySetResult(message.TryGetProperty("applied", out var applied) && applied.ValueKind == JsonValueKind.True);
+                }
+
+                break;
+            }
             case "taken":
             {
                 var requestId = message.GetProperty("requestId").GetString() ?? string.Empty;
@@ -342,7 +401,10 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
             Url: tab.Url,
             Content: new ActivityContent(provider, contentId, media?.Title ?? tab.Title),
             Playback: media is null ? null : new Playback(media.PositionMs, media.DurationMs, media.Playing, media.Rate <= 0 ? 1 : media.Rate, updatedAt),
-            Volume: media?.Volume);
+            Volume: media?.Volume,
+            Audible: media is null ? null : tab.Audible,
+            // The active tab of the browser window the user was last in.
+            Focused: tab.Active);
     }
 
     /// <summary>Which service a URL belongs to, and the item's id there when it is in the URL.</summary>
@@ -465,9 +527,12 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
 
         /// <summary>False for a Firefox extension until its hello carried the token.</summary>
         public bool Proven { get; set; } = true;
+
+        /// <summary>The extension answers a resume with whether the seek applied (0.1.2 and later).</summary>
+        public bool ConfirmsResume { get; set; }
     }
 
-    public sealed record TabState(int TabId, bool Active, string Url, string? Title, MediaState? Media, long UpdatedAt);
+    public sealed record TabState(int TabId, bool Active, string Url, string? Title, MediaState? Media, long UpdatedAt, bool? Audible = null);
 
     public sealed record MediaState(string? Title, string? Artist, string? Artwork, long PositionMs, long DurationMs, bool Playing, double Rate, bool Live, double? Volume = null);
 }

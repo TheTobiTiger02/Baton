@@ -29,6 +29,7 @@ public class MediaTests
         { "020000000A0000001407800438FFFF0002", new ScrollMessage(10, 20, 1920, 1080, -1, 2) },
         { "03000000001D0000000000001000", new KeyMessage(KeyAction.Down, 29, 0, 0x1000) },
         { "040000000368C3A9", new TextMessage("hé") },
+        { "0D0000000368C3A9", new ClipboardMessage("hé") },
         { "0500", new NavigateMessage(NavigationTarget.Back) },
         { "08", new KeyframeRequestMessage() },
         { "0901", new RotateMessage(1) },
@@ -96,5 +97,43 @@ public class MediaTests
     {
         var slice = Convert.FromHexString("0000000165888400FF");
         Assert.Equal(slice, H264Sps.DeclareNoReordering(slice));
+    }
+}
+
+public class BitrateLadderTests
+{
+    [Fact]
+    public void StepsDownAtOnceAndUpSlowly()
+    {
+        var start = DateTimeOffset.UtcNow;
+        var ladder = new Baton.Host.Streaming.BitrateLadder(Baton.Host.Streaming.StreamQuality.Auto, remote: false, start);
+        Assert.Equal(12_000_000, ladder.Bitrate);
+
+        // A drop right after starting waits for the spacing; then each drop is one step.
+        Assert.Null(ladder.Dropped(start.AddSeconds(1)));
+        Assert.Equal(6_000_000, ladder.Dropped(start.AddSeconds(3)));
+        Assert.Equal(3_000_000, ladder.Dropped(start.AddSeconds(5)));
+
+        // Recovery needs 10 quiet seconds per step.
+        Assert.Null(ladder.Tick(start.AddSeconds(10)));
+        Assert.Equal(6_000_000, ladder.Tick(start.AddSeconds(15)));
+        Assert.Null(ladder.Tick(start.AddSeconds(20)));
+        Assert.Equal(12_000_000, ladder.Tick(start.AddSeconds(25)));
+        Assert.Null(ladder.Tick(start.AddSeconds(60)));
+    }
+
+    [Fact]
+    public void QualityAndLinkSetTheRange()
+    {
+        var now = DateTimeOffset.UtcNow;
+        Assert.Equal(6_000_000, new Baton.Host.Streaming.BitrateLadder(Baton.Host.Streaming.StreamQuality.Auto, remote: true, now).Bitrate);
+        var high = new Baton.Host.Streaming.BitrateLadder(Baton.Host.Streaming.StreamQuality.High, remote: true, now);
+        Assert.Equal(12_000_000, high.Bitrate);
+        Assert.Null(high.Dropped(now.AddSeconds(5)));
+        Assert.Equal(3_000_000, new Baton.Host.Streaming.BitrateLadder(Baton.Host.Streaming.StreamQuality.DataSaver, remote: false, now).Bitrate);
+
+        Assert.True(Baton.Host.Streaming.BitrateLadder.IsRemote(System.Net.IPAddress.Parse("100.101.1.2")));
+        Assert.False(Baton.Host.Streaming.BitrateLadder.IsRemote(System.Net.IPAddress.Parse("192.168.178.181")));
+        Assert.False(Baton.Host.Streaming.BitrateLadder.IsRemote(System.Net.IPAddress.Parse("100.200.1.2")));
     }
 }

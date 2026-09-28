@@ -26,36 +26,40 @@ object BatonNotifications {
     private const val CHANNEL_CONTINUE = "continue"
     private const val CHANNEL_RESULTS = "results"
 
+    /**
+     * One line and at most one button, for what the user most likely wants next: send what this
+     * phone plays to the PC, else continue what the PC has, else send what this phone shows.
+     */
     fun link(context: Context): Notification {
         ensureChannels(context)
         val status = Link.status.value
         val pc = Link.peers.value.firstOrNull { it.kind == "pc" }
+        val pcName = pc?.name ?: "PC"
         val pcActivity = pc?.activities?.firstOrNull()
         val local = HandoffEngine.local.value.firstOrNull()
-
-        val (title, text) = when {
-            status.phase != LinkPhase.Ready -> "Baton" to status.detail.ifBlank { "Not connected" }
-            pcActivity != null -> "On ${pc.name}: ${pcActivity.title}" to (pcActivity.subtitle ?: pcActivity.app.name)
-            local != null -> "Ready to continue on ${pc?.name ?: "your PC"}" to local.title
-            else -> "Connected to ${pc?.name ?: "your PC"}" to "Play something, then send it with one tap."
-        }
+        val ready = status.phase == LinkPhase.Ready
 
         val builder = Notification.Builder(context, CHANNEL_LINK)
             .setSmallIcon(R.drawable.ic_baton)
-            .setContentTitle(title)
-            .setContentText(text)
             .setContentIntent(activityIntent(context, 0, Intent(context, MainActivity::class.java)))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
 
-        if (status.phase == LinkPhase.Ready) {
-            if (pcActivity != null && pc != null) {
-                builder.addAction(action(context, 1, "Continue here", HandoffActionReceiver.pull(context, pc)))
-            }
-            if (local != null) {
-                builder.addAction(action(context, 2, "Send to PC", HandoffActionReceiver.send(context)))
-            }
+        // Collapsed notifications hide their buttons (Samsung collapses this one), so tapping the
+        // line itself does what its title says.
+        fun offer(title: String, code: Int, label: String, intent: Intent) {
+            val action = action(context, code, label, intent)
+            builder.setContentTitle(title).setContentIntent(action.actionIntent).addAction(action)
+        }
+
+        when {
+            !ready -> builder.setContentTitle(status.detail.ifBlank { "Not connected" })
+            local != null && (local.playback?.playing == true || pcActivity == null) ->
+                offer("Send to $pcName: ${local.title}", 2, "Send to $pcName", HandoffActionReceiver.send(context))
+            pcActivity != null && pc != null ->
+                offer("Continue here: ${pcActivity.title}", 1, "Continue here", HandoffActionReceiver.pull(context, pc))
+            else -> builder.setContentTitle("Connected to $pcName")
         }
         return builder.build()
     }

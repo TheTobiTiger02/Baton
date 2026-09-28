@@ -31,6 +31,10 @@ public sealed class MediaChannelHub(StreamTicketStore tickets, DiagnosticsLog di
 
     public bool IsOpen(string deviceId) => _channels.ContainsKey(deviceId);
 
+    /// <summary>The phone's channel comes over Tailscale rather than the home network.</summary>
+    public bool IsRemote(string deviceId) =>
+        _channels.TryGetValue(deviceId, out var channel) && BitrateLadder.IsRemote(channel.RemoteAddress);
+
     /// <summary>A single-use ticket the phone presents to open its channel.</summary>
     public MediaChannelPayload Issue(string deviceId)
     {
@@ -108,6 +112,8 @@ public sealed class MediaChannelHub(StreamTicketStore tickets, DiagnosticsLog di
         private int _queuedVideo;
         private bool _awaitingKeyframe;
         private int _closed;
+
+        public System.Net.IPAddress? RemoteAddress => _connection.RemoteEndPoint?.Address;
 
         public Channel(MediaChannelHub owner, StreamConnection connection)
         {

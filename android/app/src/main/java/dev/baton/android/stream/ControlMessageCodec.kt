@@ -20,6 +20,7 @@ object ControlMessageCodec {
     const val TYPE_ROTATE = 0x09
     const val TYPE_MOUSE_MOVE = 0x0B
     const val TYPE_MOUSE_BUTTON = 0x0C
+    const val TYPE_CLIPBOARD = 0x0D
 
     const val TOUCH_DOWN = 0
     const val TOUCH_UP = 1
@@ -75,11 +76,19 @@ object ControlMessageCodec {
             putInt(metaState)
         }.array()
 
-    fun text(value: String): ByteArray {
+    fun text(value: String): ByteArray = textRecord(TYPE_TEXT, value)
+
+    /** Text copied on one side of a mirror or stream, for the other side's clipboard. */
+    fun clipboard(value: String): ByteArray = textRecord(TYPE_CLIPBOARD, value)
+
+    /** Whether text fits a message; longer clipboard contents are not synced. */
+    fun fitsText(value: String): Boolean = value.toByteArray(StandardCharsets.UTF_8).size <= MAX_TEXT_BYTES
+
+    private fun textRecord(type: Int, value: String): ByteArray {
         val utf8 = value.toByteArray(StandardCharsets.UTF_8)
         require(utf8.size <= MAX_TEXT_BYTES) { "Text exceeds $MAX_TEXT_BYTES bytes." }
         return buffer(1 + 4 + utf8.size).apply {
-            put(TYPE_TEXT.toByte())
+            put(type.toByte())
             putInt(utf8.size)
             put(utf8)
         }.array()
@@ -124,13 +133,8 @@ object ControlMessageCodec {
                 vertical = body.short.toInt()
             )
             TYPE_KEY -> ControlMessage.Key(body.get().toInt() and 0xFF, body.int, body.int, body.int)
-            TYPE_TEXT -> {
-                val length = body.int
-                require(length in 0..MAX_TEXT_BYTES && length <= body.remaining()) { "Control text length $length is out of range." }
-                val utf8 = ByteArray(length)
-                body.get(utf8)
-                ControlMessage.Text(String(utf8, StandardCharsets.UTF_8))
-            }
+            TYPE_TEXT -> ControlMessage.Text(readText(body))
+            TYPE_CLIPBOARD -> ControlMessage.Clipboard(readText(body))
             TYPE_NAV -> ControlMessage.Navigate(body.get().toInt() and 0xFF)
             TYPE_KEYFRAME -> ControlMessage.KeyframeRequest
             TYPE_ROTATE -> ControlMessage.Rotate(body.get().toInt() and 0xFF)
@@ -138,6 +142,14 @@ object ControlMessageCodec {
             TYPE_MOUSE_BUTTON -> ControlMessage.MouseButton(body.get().toInt() and 0xFF, body.get().toInt() and 0xFF)
             else -> throw IllegalArgumentException("Unknown control message type 0x${(bytes[0].toInt() and 0xFF).toString(16)}.")
         }
+    }
+
+    private fun readText(body: ByteBuffer): String {
+        val length = body.int
+        require(length in 0..MAX_TEXT_BYTES && length <= body.remaining()) { "Control text length $length is out of range." }
+        val utf8 = ByteArray(length)
+        body.get(utf8)
+        return String(utf8, StandardCharsets.UTF_8)
     }
 
     private fun buffer(capacity: Int): ByteBuffer = ByteBuffer.allocate(capacity).order(ByteOrder.BIG_ENDIAN)
@@ -153,4 +165,5 @@ sealed interface ControlMessage {
     data class Rotate(val orientation: Int) : ControlMessage
     data class MouseMove(val dx: Int, val dy: Int) : ControlMessage
     data class MouseButton(val button: Int, val action: Int) : ControlMessage
+    data class Clipboard(val value: String) : ControlMessage
 }

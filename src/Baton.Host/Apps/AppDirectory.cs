@@ -47,8 +47,14 @@ public sealed class AppDirectory
         }
     }
 
-    public void SetPhoneApps(string deviceId, IReadOnlyList<InstalledApp> apps) =>
+    /// <summary>A phone's list of apps arrived or changed, so what fits it may differ. Any thread.</summary>
+    public event Action? CatalogChanged;
+
+    public void SetPhoneApps(string deviceId, IReadOnlyList<InstalledApp> apps)
+    {
         _phoneApps[deviceId] = apps.Select(app => new CatalogApp(app.Id, app.Name, IsBrowser: IsAndroidBrowser(app.Id))).ToArray();
+        CatalogChanged?.Invoke();
+    }
 
     public IReadOnlyList<CatalogApp> AppsOf(string platform, string deviceId) =>
         platform == Platforms.Windows ? Pc.Apps : _phoneApps.GetValueOrDefault(deviceId) ?? [];
@@ -58,22 +64,42 @@ public sealed class AppDirectory
         AppMatcher.Options(activity, sourcePlatform, targetPlatform, AppsOf(targetPlatform, targetDeviceId),
             canStream: sourcePlatform == Platforms.Android || activity.Window is not null);
 
-    public HandoffChoice? Remembered(Activity activity, string sourcePlatform, string targetPlatform)
+    public HandoffChoice? Remembered(Activity activity, string sourcePlatform, string targetPlatform, string targetDeviceId)
     {
+        var key = ChoiceKeys.For(sourcePlatform, activity, targetPlatform);
+        HandoffChoice? choice;
         lock (_gate)
         {
-            return _preferences.GetValueOrDefault(ChoiceKeys.For(sourcePlatform, activity, targetPlatform))?.Choice;
+            choice = (_preferences.GetValueOrDefault(DeviceKey(key, targetDeviceId)) ?? _preferences.GetValueOrDefault(key))?.Choice;
         }
+
+        // An app the target doesn't have (RVX picked on the other phone) is no choice for it.
+        var apps = AppsOf(targetPlatform, targetDeviceId);
+        return choice is { Kind: ChoiceKinds.App, AppId: { } id } && apps.Count > 0
+            && !apps.Any(app => string.Equals(app.Id, id, StringComparison.OrdinalIgnoreCase))
+            ? null
+            : choice;
     }
 
     /// <summary>The remembered choice, or the best option (null when there is nothing but the usual way).</summary>
     public HandoffChoice? Resolve(Activity activity, string sourcePlatform, string targetPlatform, string targetDeviceId) =>
-        Remembered(activity, sourcePlatform, targetPlatform)
+        Remembered(activity, sourcePlatform, targetPlatform, targetDeviceId)
         ?? Options(activity, sourcePlatform, targetPlatform, targetDeviceId).FirstOrDefault();
 
-    public void Remember(Activity activity, string sourcePlatform, string targetPlatform, HandoffChoice choice)
+    /// <summary>
+    /// Remembers a choice for an app and direction. A particular build of an app (YouTube vs
+    /// ReVanced vs RVX) is remembered for that one phone: each phone has its own builds.
+    /// </summary>
+    public void Remember(Activity activity, string sourcePlatform, string targetPlatform, string targetDeviceId, HandoffChoice choice)
     {
         var key = ChoiceKeys.For(sourcePlatform, activity, targetPlatform);
+        if (choice is { Kind: ChoiceKinds.App, AppId: { } build } && targetPlatform == Platforms.Android
+            && Media.KnownApps.FromProvider(activity.Content?.Provider) is { } known
+            && known.AndroidPackages.Contains(build, StringComparer.OrdinalIgnoreCase))
+        {
+            key = DeviceKey(key, targetDeviceId);
+        }
+
         lock (_gate)
         {
             if (_preferences.TryGetValue(key, out var existing) && existing.Choice == (choice with { Remember = false }))
@@ -88,6 +114,8 @@ public sealed class AppDirectory
         _diagnostics.Record(DiagnosticsCategory.Handoff, "choice.remembered", $"{key} = {choice.Kind} {choice.Label}");
         PreferencesChanged?.Invoke();
     }
+
+    private static string DeviceKey(string key, string deviceId) => $"{key}@{deviceId}";
 
     public void Forget(string key)
     {
@@ -125,16 +153,26 @@ public sealed class AppDirectory
         switch (choice.Kind)
         {
             case ChoiceKinds.Web:
-                Shell(choice.Url ?? url ?? throw new InvalidOperationException("The choice has no address."));
+                if ((choice.Url ?? url) is not { } address)
+                {
+                    detail = "Couldn't read the page's address on the phone. Open the page again, then send it.";
+                    return HandoffStatus.Failed;
+                }
+
+                Shell(address);
                 return HandoffStatus.Opened;
 
             case ChoiceKinds.App when choice.AppId is { } id:
             {
-                var app = Pc.Apps.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase));
-                if (app?.BrowserExe is { } browser || id.StartsWith("browser:", StringComparison.Ordinal))
+                if (BrowserExeFor(choice) is { } exe)
                 {
-                    var exe = app?.BrowserExe ?? id["browser:".Length..];
-                    Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, ArgumentList = { url ?? "about:blank" } });
+                    if (url is null)
+                    {
+                        detail = "Couldn't read the page's address on the phone. Open the page again, then send it.";
+                        return HandoffStatus.Failed;
+                    }
+
+                    Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, ArgumentList = { url } });
                     return HandoffStatus.Opened;
                 }
 
@@ -159,6 +197,18 @@ public sealed class AppDirectory
             default:
                 throw new InvalidOperationException($"'{choice.Kind}' is not an app or website.");
         }
+    }
+
+    /// <summary>The browser program a choice opens, or null when the choice isn't a browser.</summary>
+    public string? BrowserExeFor(HandoffChoice choice)
+    {
+        if (choice is not { Kind: ChoiceKinds.App, AppId: { } id })
+        {
+            return null;
+        }
+
+        var app = Pc.Apps.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase));
+        return app?.BrowserExe ?? (id.StartsWith("browser:", StringComparison.Ordinal) ? id["browser:".Length..] : null);
     }
 
     /// <summary>Starts a Start-menu entry: an AUMID, a program path, or a launch URI (Google Play Games).</summary>

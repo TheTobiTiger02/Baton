@@ -28,19 +28,23 @@ public sealed class BatonRuntime : IAsyncDisposable
         Media.IsCoveredElsewhere = Browser.Covers;
         Browser.TokenPath = BrowserToken.EnsureFile(Host.StorageDirectory);
         Apps = new Baton.Host.Apps.AppDirectory(Host.StorageDirectory, Host.Diagnostics) { ResumeExisting = ResumeExistingAsync };
+        var mediaOpener = new MediaOpener(Media, youtube, Host.Diagnostics, Browser.ExpectSeek, ResumeExistingAsync);
         Coordinator = new HandoffCoordinator(
             Host,
             [Browser, Media, Windows],
             [
                 new LocalMediaOpener(Host.Files, Media, Host.Diagnostics),
-                new MediaOpener(Media, youtube, Host.Diagnostics, Browser.ExpectSeek, ResumeExistingAsync)
+                mediaOpener
             ],
             new ActivityEnricher(youtube, Host.Diagnostics),
             Apps)
         {
             OfferStream = (activity, target, sessionId) => activity.Window is { } window
                 ? Host.WindowStreams.Start(target, DesktopWindows.FromToken(window.WindowToken), activity.Title, sessionId)
-                : null
+                : null,
+            // Both ways, whichever the activity came from: pausing an already paused player is harmless.
+            PauseElsewhere = async activity => await Browser.PauseMatchingAsync(activity.Title) | await Media.PauseMatchingAsync(activity.Title),
+            OpenInBrowser = (activity, browser) => mediaOpener.TryOpenAsync(activity, browser, CancellationToken.None)
         };
         Presence.Changed += Coordinator.SetLocalPresence;
         Presence.Returned += away =>

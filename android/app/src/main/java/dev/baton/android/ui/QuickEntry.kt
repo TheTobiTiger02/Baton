@@ -8,6 +8,7 @@ import android.service.quicksettings.TileService
 import android.widget.Toast
 import dev.baton.android.handoff.ContentLinks
 import dev.baton.android.handoff.HandoffEngine
+import dev.baton.android.handoff.KnownApps
 import dev.baton.android.handoff.MediaSessions
 import dev.baton.android.link.Link
 import dev.baton.android.protocol.Activity as BatonActivity
@@ -55,13 +56,15 @@ class ShareToPcActivity : Activity() {
         }
 
         // The share sheet hides who shared, so the app is inferred from the link itself.
-        val sourcePackage = when {
-            url.contains("music.youtube.com") -> "com.google.android.apps.youtube.music"
-            ContentLinks.youTubeVideoId(url) != null -> "com.google.android.youtube"
-            url.contains("spotify") -> "com.spotify.music"
+        // Any build of it: ReVanced shares YouTube links too.
+        val sourceApp = when {
+            url.contains("music.youtube.com") -> KnownApps.fromProvider("youtubemusic")
+            ContentLinks.youTubeVideoId(url) != null -> KnownApps.fromProvider("youtube")
+            url.contains("spotify") -> KnownApps.fromProvider("spotify")
             else -> null
         }
-        val session = sourcePackage?.let { MediaSessions.controllerFor(it) }
+        val session = sourceApp?.let { MediaSessions.controllerForApp(it) }
+        val sourcePackage = session?.packageName ?: sourceApp?.androidPackage
         val position = session?.playbackState?.let { state -> with(MediaSessions) { state.currentPosition() } } ?: 0L
         val duration = session?.metadata?.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION) ?: 0L
         session?.transportControls?.pause()

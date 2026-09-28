@@ -197,6 +197,7 @@ class MirrorService : Service() {
     private var projection: MediaProjection? = null
     private var display: VirtualDisplay? = null
     private var codec: MediaCodec? = null
+    private val bitrate = MirrorBitrate()
     private var drain: Thread? = null
     private var audio: Thread? = null
     private var awake: View? = null
@@ -267,6 +268,7 @@ class MirrorService : Service() {
         startVideo()
         startAudio(projection)
         keepScreenOn()
+        dev.baton.android.stream.ClipboardSync.start(this)
         PhoneMirror.sendMeta("input", session = session)
         if (!PhoneMirror.inputReady) {
             // Without it the PC can watch but not touch: say so here, where it can be fixed.
@@ -290,6 +292,7 @@ class MirrorService : Service() {
             PhoneMirror.log("Mirror ended: $reason")
             PhoneMirror.sendMeta("end", reason = reason, session = session)
         }
+        if (running) dev.baton.android.stream.ClipboardSync.stop()
         running = false
         MediaChannel.controlSink = null
         stopVideo()
@@ -351,7 +354,7 @@ class MirrorService : Service() {
         size = width to height
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-            setInteger(MediaFormat.KEY_BIT_RATE, 10_000_000)
+            setInteger(MediaFormat.KEY_BIT_RATE, bitrate.bitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE, 60)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 10)
             setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
@@ -387,6 +390,7 @@ class MirrorService : Service() {
         PhoneMirror.sendMeta("format", size.first, size.second, now = true, session = session)
         val info = MediaCodec.BufferInfo()
         val scratch = ByteArray(2 * 1024 * 1024)
+        var behind = false
         while (running && codec === encoder) {
             val index = try {
                 encoder.dequeueOutputBuffer(info, 100_000)
@@ -399,13 +403,34 @@ class MirrorService : Service() {
                 var flags = 0
                 if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) flags = flags or StreamProtocol.FLAG_CODEC_CONFIG
                 if (info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0) flags = flags or StreamProtocol.FLAG_KEYFRAME
+                // Behind, frames that waited meanwhile are stale: skip to the next keyframe instead
+                // of sending them late, so the PC shows the phone as it is now.
+                val key = flags != 0
+                if (behind && !key) {
+                    runCatching { encoder.releaseOutputBuffer(index, false) }
+                    continue
+                }
+                behind = false
                 val bytes = if (info.size <= scratch.size) scratch else ByteArray(info.size)
                 buffer.position(info.offset)
                 buffer.get(bytes, 0, info.size)
+                val started = SystemClock.elapsedRealtime()
                 MediaChannel.sendNow(StreamProtocol.CHANNEL_VIDEO, bytes, flags, info.presentationTimeUs, 0, info.size)
+                if (SystemClock.elapsedRealtime() - started > SLOW_WRITE_MS) {
+                    behind = true
+                    requestKeyframe()
+                    bitrate.dropped()?.let { setBitrate(encoder, it) }
+                } else {
+                    bitrate.tick()?.let { setBitrate(encoder, it) }
+                }
             }
             runCatching { encoder.releaseOutputBuffer(index, false) }
         }
+    }
+
+    private fun setBitrate(encoder: MediaCodec, bitsPerSecond: Int) {
+        runCatching { encoder.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, bitsPerSecond) }) }
+        PhoneMirror.log("Mirror bitrate ${bitsPerSecond / 1_000_000.0} Mbps")
     }
 
     private fun requestKeyframe() {
@@ -520,6 +545,9 @@ class MirrorService : Service() {
         const val EXTRA_DATA = "data"
         private const val CHANNEL = "mirror"
         private const val NOTIFICATION_ID = 9
+
+        /** A video write that blocks this long means the socket is full: the link can't keep up. */
+        private const val SLOW_WRITE_MS = 50L
         private const val CHUNK_BYTES = 48_000 / 100 * 2 * 2
 
         /** A kept-ready capture gives up after this long unused, so the cast icon doesn't stay for good. */

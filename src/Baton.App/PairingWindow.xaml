@@ -32,6 +32,17 @@
                 </StackPanel>
             </Grid>
 
+            <DockPanel Margin="0,24,0,0">
+                <Border DockPanel.Dock="Left" Background="White" CornerRadius="8" Padding="8" Width="96" Height="96">
+                    <Image x:Name="AppQr" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                </Border>
+                <StackPanel Margin="16,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="No Baton on the phone yet?" FontWeight="SemiBold" />
+                    <TextBlock Style="{StaticResource CaptionText}" TextWrapping="Wrap"
+                               Text="Scan this with the phone's camera to download the app, install it, then scan the code above." />
+                </StackPanel>
+            </DockPanel>
+
             <Border x:Name="SuccessBar" Style="{StaticResource InfoBar}" Margin="0,24,0,0" Visibility="Collapsed" Background="{DynamicResource SuccessFillBrush}">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="&#xE73E;" Style="{StaticResource IconGlyph}" Foreground="{DynamicResource SuccessBrush}" Margin="0,0,10,0" />

@@ -149,9 +149,9 @@
 
   chrome.runtime.onMessage.addListener((message, _sender, reply) => {
     if (message.type === "take") {
-      const snapshot = state();
+      // Paused first, so the snapshot says whether it really stopped, at the second it stopped.
       if (message.pause && media && !media.paused) media.pause();
-      reply(snapshot);
+      reply(state());
       return;
     }
     if (message.type === "command" && media) {

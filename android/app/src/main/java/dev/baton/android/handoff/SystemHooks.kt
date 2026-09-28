@@ -5,6 +5,7 @@ import android.app.KeyguardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
@@ -12,6 +13,9 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import dev.baton.android.protocol.PresenceState
 import dev.baton.android.ui.BatonNotifications
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /**
  * Baton's notification listener. It reads no notifications; the grant is what unlocks the phone's
@@ -89,6 +93,51 @@ class BatonAccessibilityService : AccessibilityService() {
         fun isGranted(context: Context): Boolean =
             Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
                 ?.contains(ComponentName(context, BatonAccessibilityService::class.java).flattenToString()) == true
+
+        /**
+         * The full address of the page [packageName] shows, for browsers whose bar shows only the
+         * site until it is edited (Samsung Internet). Taps the bar, reads it, and leaves edit mode
+         * again; the browser is brought to the front first when something else is (the shade after
+         * a notification button, or Baton itself). Null when it can't be read.
+         */
+        suspend fun revealUrl(context: Context, packageName: String): String? = withContext(Dispatchers.Main) {
+            val service = instance ?: return@withContext null
+            val barId = KnownApps.urlBarIds[packageName] ?: return@withContext null
+            fun bar(): AccessibilityNodeInfo? = service.rootInActiveWindow
+                ?.takeIf { it.packageName == packageName }
+                ?.findAccessibilityNodeInfosByViewId(barId)?.firstOrNull()
+
+            if (bar() == null) {
+                if (Build.VERSION.SDK_INT >= 31) service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+                delay(REVEAL_STEP_MS * 3)
+            }
+            if (bar() == null) {
+                val launch = context.packageManager.getLaunchIntentForPackage(packageName) ?: return@withContext null
+                context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                repeat(10) { if (bar() == null) delay(REVEAL_STEP_MS) }
+            }
+            val node = bar() ?: return@withContext null
+            node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            var url: String? = null
+            for (attempt in 1..10) {
+                delay(REVEAL_STEP_MS)
+                val text = bar()?.takeIf { it.isFocused }?.text?.toString()?.let(ContentLinks::normalizeUrl)
+                if (text != null && !ContentLinks.isHostOnly(text)) {
+                    url = text
+                    break
+                }
+            }
+            // Back out of editing: the first Back closes the keyboard, the second leaves the bar.
+            repeat(2) {
+                if (bar()?.isFocused == true) {
+                    service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+                    delay(REVEAL_STEP_MS * 2)
+                }
+            }
+            url
+        }
+
+        private const val REVEAL_STEP_MS = 100L
     }
 }
 

@@ -10,6 +10,12 @@ public partial class App : Application
     private bool _ownsInstanceMutex;
     private AppServices? _services;
 
+    public App()
+    {
+        // Setup.exe and the uninstaller start Baton with hook arguments; those exit here.
+        Updates.RunHooks();
+    }
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         var startHidden = e.Args.Any(argument => string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));

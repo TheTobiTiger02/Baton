@@ -185,11 +185,11 @@ object Openers {
 
     /**
      * The build of [app] to open: [pinned] when the user chose one, else the build they used last
-     * (it had a media session), else the most recently updated one; never a disabled one.
+     * (see [KnownApps.packageFor]); never a disabled one.
      */
     private fun installedPackage(context: Context, app: KnownApp, pinned: String? = null): String =
         pinned?.takeIf { it in app.packages && isUsable(context, it) }
-            ?: KnownApps.packageFor(app, { isUsable(context, it) }, MediaSessions.lastUsed(app.provider)) { lastUpdate(context, it) }
+            ?: KnownApps.packageFor(app, { isUsable(context, it) }, MediaSessions.lastUsed(app.provider))
 
     /** Installed and not disabled: a disabled YouTube is still "installed" but can't open anything. */
     fun isUsable(context: Context, packageName: String): Boolean = try {
@@ -197,9 +197,6 @@ object Openers {
     } catch (_: PackageManager.NameNotFoundException) {
         false
     }
-
-    private fun lastUpdate(context: Context, packageName: String): Long =
-        runCatching { context.packageManager.getPackageInfo(packageName, 0).lastUpdateTime }.getOrDefault(0L)
 
     fun isInstalled(context: Context, packageName: String): Boolean = try {
         context.packageManager.getPackageInfo(packageName, 0)

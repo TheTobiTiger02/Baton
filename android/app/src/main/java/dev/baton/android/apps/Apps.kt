@@ -16,6 +16,7 @@ import dev.baton.android.protocol.AppCatalogPayload
 import dev.baton.android.protocol.AppPreference
 import dev.baton.android.protocol.AppPreferenceRemovePayload
 import dev.baton.android.protocol.ChoiceKeys
+import dev.baton.android.protocol.ChoiceKinds
 import dev.baton.android.protocol.HandoffChoice
 import dev.baton.android.protocol.HandoffOptionsPayload
 import dev.baton.android.protocol.HandoffOptionsRequest
@@ -109,8 +110,22 @@ object Choices {
 
     fun platformOf(deviceId: String) = if (deviceId == Link.hostId) Platforms.WINDOWS else Platforms.ANDROID
 
-    fun remembered(activity: Activity, sourceDeviceId: String, targetDeviceId: String): HandoffChoice? =
-        preferencesFlow.value[ChoiceKeys.of(platformOf(sourceDeviceId), activity, platformOf(targetDeviceId))]?.choice
+    /** This phone's package manager, to skip remembered apps it doesn't have; set while Baton runs. */
+    @Volatile var packages: android.content.pm.PackageManager? = null
+
+    /**
+     * The choice remembered for this app and direction: the one for [targetDeviceId] first (each
+     * phone has its own YouTube build), then the shared one. An app this phone doesn't have (RVX
+     * picked on another phone) is no choice here.
+     */
+    fun remembered(activity: Activity, sourceDeviceId: String, targetDeviceId: String): HandoffChoice? {
+        val key = ChoiceKeys.of(platformOf(sourceDeviceId), activity, platformOf(targetDeviceId))
+        val choice = (preferencesFlow.value["$key@$targetDeviceId"] ?: preferencesFlow.value[key])?.choice ?: return null
+        val app = choice.appId
+        val missing = targetDeviceId == Link.deviceId && choice.kind == ChoiceKinds.APP && app != null &&
+            packages?.let { pm -> runCatching { pm.getPackageInfo(app, 0) }.isFailure } == true
+        return if (missing) null else choice
+    }
 
     /** Asks the PC how [activity] can continue on [targetDeviceId]. Null when it doesn't answer. */
     suspend fun options(activity: Activity, targetDeviceId: String): HandoffOptionsPayload? {

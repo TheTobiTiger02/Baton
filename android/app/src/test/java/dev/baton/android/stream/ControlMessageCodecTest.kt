@@ -14,6 +14,7 @@ class ControlMessageCodecTest {
         "020000000A0000001407800438FFFF0002" to ControlMessageCodec.scroll(10, 20, 1920, 1080, -1, 2),
         "03000000001D0000000000001000" to ControlMessageCodec.key(ControlMessageCodec.KEY_DOWN, 29, 0, 0x1000),
         "040000000368C3A9" to ControlMessageCodec.text("hé"),
+        "0D0000000368C3A9" to ControlMessageCodec.clipboard("hé"),
         "0500" to ControlMessageCodec.navigate(ControlMessageCodec.NAV_BACK),
         "08" to ControlMessageCodec.keyframeRequest(),
         "0901" to ControlMessageCodec.rotate(1),
@@ -32,7 +33,8 @@ class ControlMessageCodecTest {
             ControlMessageCodec.decode(bytes(vectors[0].first)))
         assertEquals(ControlMessage.Scroll(10, 20, 1920, 1080, -1, 2), ControlMessageCodec.decode(bytes(vectors[1].first)))
         assertEquals(ControlMessage.Text("hé"), ControlMessageCodec.decode(bytes(vectors[3].first)))
-        assertEquals(ControlMessage.MouseMove(-5, 12), ControlMessageCodec.decode(bytes(vectors[7].first)))
+        assertEquals(ControlMessage.Clipboard("hé"), ControlMessageCodec.decode(bytes(vectors[4].first)))
+        assertEquals(ControlMessage.MouseMove(-5, 12), ControlMessageCodec.decode(bytes(vectors[8].first)))
     }
 
     @Test

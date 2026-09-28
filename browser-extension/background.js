@@ -36,7 +36,7 @@ function connect() {
   socket.onopen = async () => {
     // Firefox extensions have a random origin, so they prove themselves with the token their
     // build carries (config.js); Chromium ones are known by their fixed origin.
-    send({ type: "hello", browser: await browserName(), token: globalThis.BATON_TOKEN });
+    send({ type: "hello", browser: await browserName(), token: globalThis.BATON_TOKEN, version: chrome.runtime.getManifest().version });
     scheduleReport(0);
   };
   socket.onmessage = (event) => onHostMessage(JSON.parse(event.data));
@@ -55,8 +55,34 @@ function send(message) {
 chrome.alarms.create("baton-connect", { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener(() => connect());
 chrome.runtime.onStartup.addListener(connect);
+
+// Content scripts only reach pages loaded after the extension: tabs already open (when it is
+// installed or reloaded) get it now, or Baton could neither see nor pause their players.
+function inject(tabId) {
+  // The Zen/Firefox build is Manifest V2, which has no chrome.scripting.
+  return chrome.scripting
+    ? chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] })
+    : chrome.tabs.executeScript(tabId, { file: "content.js" });
+}
+
+async function injectIntoOpenTabs() {
+  const open = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] }).catch(() => []);
+  for (const tab of open) inject(tab.id).catch(() => {});
+}
+
+/** Asks a tab's page script; a tab without one gets it injected and is asked once more. */
+async function askTab(tabId, message) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, message);
+  } catch {
+    await inject(tabId).catch(() => {});
+    return chrome.tabs.sendMessage(tabId, message).catch(() => null);
+  }
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   connect();
+  injectIntoOpenTabs();
   chrome.contextMenus.create({ id: "baton-send-link", title: "Continue on phone", contexts: ["link", "page"] });
 });
 connect();
@@ -73,12 +99,15 @@ function scheduleReport(delay = 300) {
 
 async function report() {
   const activeId = await activeTabId();
+  // Whether each tab makes sound: a muted autoplay video in a background tab plays but is silent,
+  // and must not pass for what the user is watching.
+  const audible = new Map((await chrome.tabs.query({}).catch(() => [])).map((t) => [t.id, !!t.audible && !(t.mutedInfo && t.mutedInfo.muted)]));
   const list = [];
   for (const [tabId, entry] of tabs) {
     const isActive = tabId === activeId;
     const mediaRelevant = entry.media && (entry.media.playing || Date.now() - entry.updatedAt < 30 * 60_000);
     if (!mediaRelevant && !isActive) continue;
-    list.push({ tabId, active: isActive, url: entry.url, title: entry.pageTitle, media: mediaRelevant ? entry.media : null, updatedAt: entry.updatedAt });
+    list.push({ tabId, active: isActive, audible: audible.get(tabId) ?? null, url: entry.url, title: entry.pageTitle, media: mediaRelevant ? entry.media : null, updatedAt: entry.updatedAt });
   }
   if (activeId !== null && !tabs.has(activeId)) {
     const tab = await chrome.tabs.get(activeId).catch(() => null);
@@ -119,6 +148,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.tabs.onActivated.addListener(() => scheduleReport());
 chrome.windows.onFocusChanged.addListener(() => scheduleReport());
 chrome.tabs.onUpdated.addListener((tabId, change) => {
+  if ("audible" in change || "mutedInfo" in change) scheduleReport();
   if (change.url || change.title) {
     const entry = tabs.get(tabId);
     if (entry && change.url) entry.url = change.url;
@@ -149,9 +179,12 @@ async function onHostMessage(message) {
       const tab = await chrome.tabs.get(message.tabId).catch(() => null);
       let snapshot = null;
       if (tab) {
-        snapshot = await chrome.tabs.sendMessage(message.tabId, { type: "take", pause: message.pause }).catch(() => null);
+        snapshot = await askTab(message.tabId, { type: "take", pause: message.pause });
         snapshot = snapshot || { url: tab.url, pageTitle: tab.title, media: null };
         tabs.set(message.tabId, { ...snapshot, updatedAt: Date.now() });
+        // Report the pause at once: the page's next update now matches what is stored, so it
+        // wouldn't, and Baton would go on showing this tab as playing.
+        scheduleReport(0);
       }
       const tabState = snapshot && { tabId: message.tabId, active: true, url: snapshot.url, title: snapshot.pageTitle, media: snapshot.media, updatedAt: Date.now() };
       send({ type: "taken", requestId: message.requestId, tabId: message.tabId, tab: tabState });
@@ -163,16 +196,21 @@ async function onHostMessage(message) {
       const before = await chrome.tabs.get(message.tabId).catch(() => null);
       const reload = before && before.discarded && message.url;
       const tab = await chrome.tabs.update(message.tabId, reload ? { active: true, url: message.url } : { active: true }).catch(() => null);
-      if (!tab) break;
+      if (!tab) {
+        send({ type: "resumed", requestId: message.requestId, applied: false });
+        break;
+      }
       chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
       // A tab the browser unloaded meanwhile reloads now; the seek then waits for its player.
       pendingSeeks.push({ url: tab.url, positionMs: message.positionMs, expiresAt: Date.now() + PENDING_SEEK_MS });
-      const result = await chrome.tabs.sendMessage(message.tabId, { type: "seek", positionMs: message.positionMs, play: true }).catch((e) => ({ error: String(e) }));
+      const result = reload ? { applied: true, reason: "reloading at the link's time" }
+        : (await askTab(message.tabId, { type: "seek", positionMs: message.positionMs, play: true })) || { applied: false, reason: "no page script" };
+      send({ type: "resumed", requestId: message.requestId, applied: !!result.applied });
       send({ type: "log", text: `resume tab ${message.tabId} at ${message.positionMs} ms: ${JSON.stringify(result)}` });
       break;
     }
     case "command":
-      chrome.tabs.sendMessage(message.tabId, { type: "command", action: message.action, positionMs: message.positionMs, volume: message.volume }).catch(() => {});
+      askTab(message.tabId, { type: "command", action: message.action, positionMs: message.positionMs, volume: message.volume });
       break;
     case "expect":
       pendingSeeks.push({ url: message.url, positionMs: message.positionMs, expiresAt: Date.now() + PENDING_SEEK_MS });

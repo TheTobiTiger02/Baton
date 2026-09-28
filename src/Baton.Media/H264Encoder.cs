@@ -156,6 +156,9 @@ public sealed class H264Encoder : IDisposable
     /// <summary>Makes the next frame a keyframe, e.g. after the viewer reconnects.</summary>
     public void RequestKeyframe() => _codecApi?.TrySet(ForceKeyFrame, 1u);
 
+    /// <summary>Changes the target bitrate of the running stream (CBR), for a link that slowed down or recovered.</summary>
+    public void SetBitrate(int bitsPerSecond) => _codecApi?.TrySet(MeanBitRate, (uint)bitsPerSecond);
+
     private void Pump()
     {
         while (!_stop.IsCancellationRequested)

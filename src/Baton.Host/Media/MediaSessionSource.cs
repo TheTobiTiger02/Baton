@@ -15,6 +15,9 @@ namespace Baton.Host.Media;
 /// </summary>
 public sealed class MediaSessionSource : IActivitySource, IActivityControl, IDisposable
 {
+    private static readonly TimeSpan ResumeSettleDelay = TimeSpan.FromMilliseconds(600);
+    private const long ResumeToleranceMs = 3_000;
+
     // Activity ids are not always the session's (a local file's is the file's): which session is whose.
     private readonly ConcurrentDictionary<string, string> _appIdByActivity = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, (DateTime At, double? Volume)> _volumeCache = new(StringComparer.OrdinalIgnoreCase);
@@ -193,11 +196,44 @@ public sealed class MediaSessionSource : IActivitySource, IActivityControl, IDis
                 DesktopWindows.BringToFront(window.Handle);
             }
 
-            _diagnostics.Record(DiagnosticsCategory.Handoff, "resume.session", $"{session.SourceAppUserModelId}: {properties.Title}");
-            return true;
+            // Some players ignore seeks (Firefox-based browsers): only a position that actually
+            // moved counts, otherwise the caller opens it afresh at the right second.
+            await Task.Delay(ResumeSettleDelay);
+            var timeline = session.GetTimelineProperties();
+            var now = timeline is null ? (long?)null : (long)timeline.Position.TotalMilliseconds;
+            var moved = now is null || Math.Abs(now.Value - positionMs) <= ResumeToleranceMs;
+            _diagnostics.Record(DiagnosticsCategory.Handoff, moved ? "resume.session" : "resume.session.ignored-seek",
+                $"{session.SourceAppUserModelId}: {properties.Title} at {now} ms, wanted {positionMs} ms");
+            return moved;
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Pauses every playing session showing <paramref name="title"/>, including ones hidden because a
+    /// browser tab reports the same media: the fallback when pausing that tab did not take. True
+    /// when one was paused.
+    /// </summary>
+    public async Task<bool> PauseMatchingAsync(string title)
+    {
+        var paused = false;
+        foreach (var session in Sessions())
+        {
+            var playing = session.GetPlaybackInfo()?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+            if (!playing)
+            {
+                continue;
+            }
+
+            var properties = await session.TryGetMediaPropertiesAsync();
+            if (properties is not null && MediaOpener.TitlesMatch(properties.Title ?? string.Empty, title))
+            {
+                paused |= await session.TryPauseAsync();
+            }
+        }
+
+        return paused;
     }
 
     public void Dispose() => _refreshGate.Dispose();

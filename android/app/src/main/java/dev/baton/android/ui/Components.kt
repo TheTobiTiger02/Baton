@@ -219,21 +219,22 @@ fun ActivityCard(
                     Button(onClick = onAction, enabled = enabled, modifier = Modifier.weight(1f).height(52.dp)) {
                         Icon(actionIcon, contentDescription = null)
                         Spacer(Modifier.width(Tokens.Space2))
-                        Text(actionLabel, style = MaterialTheme.typography.titleMedium)
+                        Text(actionLabel, style = MaterialTheme.typography.titleMedium, maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     }
                 } else {
                     FilledTonalButton(onClick = onAction, enabled = enabled, modifier = Modifier.weight(1f)) {
                         Icon(actionIcon, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(Tokens.Space2))
-                        Text(actionLabel)
+                        Text(actionLabel, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     }
                 }
                 secondaryAction?.let { extra ->
                     Spacer(Modifier.width(Tokens.Space2))
-                    OutlinedButton(onClick = extra.onClick, enabled = enabled, modifier = if (hero) Modifier.height(52.dp) else Modifier) {
-                        Icon(extra.icon, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(extra.label)
+                    // Icon only: the main action keeps the room, and a long-press names it.
+                    androidx.compose.material3.OutlinedIconButton(onClick = extra.onClick, enabled = enabled,
+                        modifier = Modifier.size(if (hero) 52.dp else 40.dp)) {
+                        Icon(extra.icon, contentDescription = extra.label, modifier = Modifier.size(20.dp))
                     }
                 }
             }
@@ -241,7 +242,10 @@ fun ActivityCard(
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
                     Text(if (choiceLabel != null) "Opens in $choiceLabel" else "Opens the best way",
                         style = MaterialTheme.typography.labelMedium, color = secondary, modifier = Modifier.weight(1f))
-                    androidx.compose.material3.TextButton(onClick = onChangeChoice, enabled = enabled) {
+                    // On the hero card's tinted background the default link colour barely shows.
+                    androidx.compose.material3.TextButton(onClick = onChangeChoice, enabled = enabled,
+                        colors = if (hero) androidx.compose.material3.ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer) else androidx.compose.material3.ButtonDefaults.textButtonColors()) {
                         Text(if (choiceLabel != null) "Change" else "Choose app")
                     }
                 }

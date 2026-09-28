@@ -84,10 +84,30 @@ public sealed class ActivityViewModel : ObservableObject
         _ => AppName
     };
 
+    /// <summary>State and time together: "Playing in Zen · 2:39 / 10:34".</summary>
+    public string StatusLine => string.IsNullOrEmpty(TimeText) ? StateText : $"{StateText} · {TimeText}";
+
     private IReadOnlyList<ActivityAction> _actions = [];
 
     /// <summary>What can be done with this activity from here: send it to a phone, or continue it on this PC.</summary>
-    public IReadOnlyList<ActivityAction> Actions { get => _actions; set => Set(ref _actions, value); }
+    public IReadOnlyList<ActivityAction> Actions
+    {
+        get => _actions;
+        set
+        {
+            if (Set(ref _actions, value))
+            {
+                Raise(nameof(Buttons));
+                Raise(nameof(MenuActions));
+                Raise(nameof(HasMenu));
+            }
+        }
+    }
+
+    /// <summary>The actions shown on the card itself; the rest wait in its "⋯" menu.</summary>
+    public IReadOnlyList<ActivityAction> Buttons => _actions.Where(action => action.Placement != ActionPlacement.Menu).ToArray();
+    public IReadOnlyList<ActivityAction> MenuActions => _actions.Where(action => action.Placement == ActionPlacement.Menu).ToArray();
+    public bool HasMenu => _actions.Any(action => action.Placement == ActionPlacement.Menu);
 
     public double Progress { get => _progress; private set => Set(ref _progress, value); }
     public string TimeText { get => _timeText; private set => Set(ref _timeText, value); }
@@ -102,7 +122,7 @@ public sealed class ActivityViewModel : ObservableObject
         }
 
         foreach (var name in new[] { nameof(Activity), nameof(Title), nameof(Subtitle), nameof(HasSubtitle), nameof(AppName),
-                     nameof(Artwork), nameof(HasArtwork), nameof(HasPlayback), nameof(IsPlaying), nameof(KindGlyph), nameof(StateText) })
+                     nameof(Artwork), nameof(HasArtwork), nameof(HasPlayback), nameof(IsPlaying), nameof(KindGlyph), nameof(StateText), nameof(StatusLine) })
         {
             Raise(name);
         }
@@ -123,6 +143,7 @@ public sealed class ActivityViewModel : ObservableObject
         var position = playback.PositionAt(DateTimeOffset.UtcNow);
         Progress = Math.Clamp((double)position / playback.DurationMs, 0, 1);
         TimeText = $"{Format(position)} / {Format(playback.DurationMs)}";
+        Raise(nameof(StatusLine));
     }
 
     private static string Format(long ms)
@@ -161,6 +182,7 @@ public sealed class DeviceViewModel : ObservableObject
     private string _name = string.Empty;
     private bool _online;
     private PresenceState _presence;
+    private bool _isDefault;
 
     public DeviceViewModel(string deviceId, string kind)
     {
@@ -177,6 +199,9 @@ public sealed class DeviceViewModel : ObservableObject
     public bool HasActivity => Activities.Count > 0;
 
     public string Name { get => _name; private set => Set(ref _name, value); }
+
+    /// <summary>The phone sends go to first: the shortcut's target and each card's main button.</summary>
+    public bool IsDefault { get => _isDefault; set => Set(ref _isDefault, value); }
 
     public bool Online
     {

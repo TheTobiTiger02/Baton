@@ -17,4 +17,7 @@ interface IShizukuShell {
 
     // One key event, as in KeyEvent.
     boolean injectKey(int action, int keyCode, int metaState) = 4;
+
+    // The clipboard's text when it changed since the last call, else null (also for sensitive clips).
+    String clipboardText() = 5;
 }

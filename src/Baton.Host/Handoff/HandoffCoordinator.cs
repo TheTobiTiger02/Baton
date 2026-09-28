@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Baton.Host.Apps;
+using Baton.Media;
 using Baton.Protocol;
 
 namespace Baton.Host.Handoff;
@@ -93,6 +94,20 @@ public sealed class HandoffCoordinator
     public Func<Activity, string, string, StreamOffer?>? OfferStream { get; set; }
 
     /// <summary>
+    /// Pauses media titled like the activity by every other means this PC has (a tab through the
+    /// extension, a system media session): used when pausing it at its source did not take. Set by
+    /// the runtime.
+    /// </summary>
+    public Func<Activity, Task<bool>>? PauseElsewhere { get; set; }
+
+    /// <summary>
+    /// Opens web media or a page in a given browser at its position, the way the default choice
+    /// does (continuing the tab that still has it, else a link with its time, then a seek):
+    /// (activity, browser program). Null when it can't handle the activity. Set by the runtime.
+    /// </summary>
+    public Func<Activity, string, Task<OpenResult?>>? OpenInBrowser { get; set; }
+
+    /// <summary>
     /// Activities that continue as a stream of their window rather than by reopening the content:
     /// windows themselves, and media apps no other device has.
     /// </summary>
@@ -114,7 +129,7 @@ public sealed class HandoffCoordinator
 
     /// <summary>What the user chose for this app and direction before, if anything.</summary>
     public HandoffChoice? Remembered(Activity activity, string sourceDeviceId, string targetDeviceId) =>
-        _apps?.Remembered(activity, PlatformOf(sourceDeviceId), PlatformOf(targetDeviceId));
+        _apps?.Remembered(activity, PlatformOf(sourceDeviceId), PlatformOf(targetDeviceId), targetDeviceId);
 
     /// <summary>
     /// The choice to use when none was given: the remembered one, else for an app (which has no
@@ -128,7 +143,7 @@ public sealed class HandoffCoordinator
     {
         if (activity is not null && choice is { Remember: true })
         {
-            _apps?.Remember(activity, PlatformOf(sourceDeviceId), PlatformOf(targetDeviceId), choice);
+            _apps?.Remember(activity, PlatformOf(sourceDeviceId), PlatformOf(targetDeviceId), targetDeviceId, choice);
         }
     }
 
@@ -328,6 +343,26 @@ public sealed class HandoffCoordinator
 
         _host.Timeline.Mark(requestId, "taken");
         activity = (activity ?? candidate) with { DeviceId = LocalDeviceId, Window = (activity ?? candidate).Window ?? candidate.Window };
+        if (!stream && candidate.Playback is { Playing: true } playing)
+        {
+            // The source's answer lost the player (a tab whose page script isn't there): the
+            // position it had a moment ago beats starting over.
+            if (activity.Playback is null)
+            {
+                var now = DateTimeOffset.UtcNow;
+                activity = activity with { Playback = playing with { PositionMs = playing.PositionAt(now), CapturedAt = now } };
+            }
+
+            // Nothing may keep playing here once it continues elsewhere.
+            if (activity.Playback is not { Playing: false })
+            {
+                var paused = PauseElsewhere is not null && await PauseElsewhere(activity);
+                _host.Diagnostics.Record(DiagnosticsCategory.Handoff, paused ? "take.pause-fallback" : "take.not-paused", activity.Title,
+                    severity: paused ? DiagnosticsSeverity.Info : DiagnosticsSeverity.Warning);
+                activity = activity with { Playback = activity.Playback! with { Playing = false } };
+            }
+        }
+
         await DeliverAsync(requestId, targetDeviceId, _enricher?.Enrich(activity) ?? activity, stream ? HandoffModes.Stream : HandoffModes.Auto, choice);
     }
 
@@ -510,8 +545,15 @@ public sealed class HandoffCoordinator
         {
             try
             {
-                // Media coming back to a browser picked for it continues in the tab it left.
-                if (choice.Kind == ChoiceKinds.App && activity.Playback is { } playback && _apps.ResumeExisting is { } resume
+                // A browser picked for it opens it the same way the default does: at its position,
+                // in the tab that still has it when there is one.
+                if (_apps.BrowserExeFor(choice) is { } browser && activity.Url is not null && OpenInBrowser is { } openIn
+                    && await openIn(activity, browser) is { } opened)
+                {
+                    result = opened;
+                }
+                // Media coming back to an app picked for it continues where it is.
+                else if (choice.Kind == ChoiceKinds.App && activity.Playback is { } playback && _apps.ResumeExisting is { } resume
                     && await resume(activity, playback.PositionAt(DateTimeOffset.UtcNow)))
                 {
                     result = OpenResult.Opened("Continued where it was on this PC");
@@ -589,9 +631,16 @@ public sealed class HandoffCoordinator
 
     private void RefreshLocal()
     {
+        // Focus is read here, at ranking time, so it is current for every source; the foreground
+        // window changing re-ranks through the window source. Browser tabs bring their own.
+        var foreground = DesktopWindows.Foreground() is { } window ? DesktopWindows.Token(window.Handle) : null;
         var ranked = ActivityRanking.Rank(
             // Windows media sessions report absurd lengths for live streams too, like phones do.
-            _sources.SelectMany(source => source.Current).Select(activity => activity.Normalized() with { DeviceId = LocalDeviceId }),
+            _sources.SelectMany(source => source.Current).Select(activity => activity.Normalized() with
+            {
+                DeviceId = LocalDeviceId,
+                Focused = activity.Window is { } owner ? owner.WindowToken == foreground : activity.Focused
+            }),
             DateTimeOffset.UtcNow);
         _localActivities = _enricher?.Enrich(ranked) ?? ranked;
         ScheduleBroadcast();
@@ -665,16 +714,31 @@ public static class ActivityRanking
 {
     /// <summary>
     /// Most relevant first: what is playing now, then recently paused media, then pages and
-    /// windows, newest first within each tier. Duplicates by id keep the one that knows its
-    /// playback position, else the newest.
+    /// windows. Within a tier, what the user is watching comes first (see <see cref="Attention"/>),
+    /// then the newest. Duplicates by id keep the one that knows its playback position, else the newest;
+    /// a window already offered as the media playing in it isn't offered again as a plain window.
     /// </summary>
-    public static IReadOnlyList<Activity> Rank(IEnumerable<Activity> activities, DateTimeOffset now) =>
-        activities
+    public static IReadOnlyList<Activity> Rank(IEnumerable<Activity> activities, DateTimeOffset now)
+    {
+        var all = activities.ToArray();
+        var mediaWindows = all.Where(activity => activity.Kind != ActivityKind.WindowStream && activity.Window is not null)
+            .Select(activity => activity.Window!.WindowToken).ToHashSet(StringComparer.Ordinal);
+        return all
+            .Where(activity => activity.Kind != ActivityKind.WindowStream || activity.Window is null || !mediaWindows.Contains(activity.Window.WindowToken))
             .GroupBy(activity => activity.Id)
             .Select(group => group.OrderByDescending(activity => activity.Playback is not null).ThenByDescending(activity => activity.UpdatedAt).First())
             .OrderByDescending(activity => Tier(activity, now))
+            .ThenByDescending(Attention)
             .ThenByDescending(activity => activity.UpdatedAt)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Sound counts most (a muted autoplay video in a background tab is not what anyone watches),
+    /// then being in the window last in front. Unknown counts as neither.
+    /// </summary>
+    private static int Attention(Activity activity) =>
+        (activity.Audible switch { true => 2, false => -2, null => 0 }) + (activity.Focused == true ? 1 : 0);
 
     private static int Tier(Activity activity, DateTimeOffset now) => activity switch
     {

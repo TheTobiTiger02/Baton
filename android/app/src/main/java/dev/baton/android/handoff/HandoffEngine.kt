@@ -102,6 +102,7 @@ object HandoffEngine {
         if (appContext != null) return
         val app = context.applicationContext
         appContext = app
+        dev.baton.android.apps.Choices.packages = app.packageManager
         MediaSessions.onChanged = ::schedulePublish
         BrowserPages.onChanged = ::schedulePublish
         app.registerReceiver(screenReceiver, IntentFilter().apply {
@@ -146,9 +147,10 @@ object HandoffEngine {
             val choice = remembered ?: run {
                 val offered = Choices.options(activity, targetDeviceId)
                 val options = offered?.options.orEmpty()
+                // One tap continues it the best way; "Choose app" (ask) is where the options are.
                 when {
                     options.isEmpty() -> null
-                    options.size == 1 && !ask -> options.first()
+                    !ask -> options.first()
                     else -> ChoicePrompt.ask(context, activity, targetDeviceId, options, offered?.remembered) ?: return@launch
                 }
             }
@@ -309,7 +311,7 @@ object HandoffEngine {
             return
         }
 
-        val activity = take(candidate)
+        val activity = take(withFullUrl(context, candidate))
         Link.notice(HandoffNotice(requestId, activity.title, "Sending to your PC…", failed = false, done = false))
         if (!Link.send(MessageTypes.HANDOFF_DELIVER, HandoffDeliverPayload(requestId, Link.deviceId, targetDeviceId, activity, choice = chosen))) {
             Link.notice(HandoffNotice(requestId, activity.title, "Not connected to your PC.", failed = true, done = true))
@@ -333,6 +335,18 @@ object HandoffEngine {
     }
 
     /** Freezes the activity at this instant and pauses it here, so it continues where it stopped. */
+    /**
+     * A page whose browser shows only the site (Samsung Internet) gets its full address read
+     * now, so the PC opens that page and not the site's home page.
+     */
+    private suspend fun withFullUrl(context: Context, activity: Activity): Activity {
+        val url = activity.url ?: return activity
+        if (!ContentLinks.isHostOnly(url)) return activity
+        val full = BatonAccessibilityService.revealUrl(context, activity.app.id) ?: return activity
+        Log.i(TAG, "Read the full address of ${activity.app.id}: $full")
+        return activity.copy(url = full)
+    }
+
     private fun take(activity: Activity): Activity {
         val playback = activity.playback ?: return activity
         val now = System.currentTimeMillis()

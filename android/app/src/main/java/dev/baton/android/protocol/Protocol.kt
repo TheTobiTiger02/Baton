@@ -270,7 +270,11 @@ data class Activity(
     val file: ActivityFile? = null,
     val playback: Playback? = null,
     val window: ActivityWindow? = null,
-    val volume: Double? = null
+    val volume: Double? = null,
+    /** Plays with sound right now; a muted autoplay video does not. Null when unknown. */
+    val audible: Boolean? = null,
+    /** In the window (or browser tab) the user last had in front. Null when unknown. */
+    val focused: Boolean? = null
 )
 
 @Serializable

@@ -39,6 +39,7 @@ public sealed class WindowStreamService : IDisposable
             if (_sessions.TryGetValue(deviceId, out var session))
             {
                 session.RequestKeyframe();
+                session.FellBehind();
             }
         };
         channels.ChannelChanged += (deviceId, open) =>
@@ -50,8 +51,11 @@ public sealed class WindowStreamService : IDisposable
         };
     }
 
-    /// <summary>A stream started (true) or ended (false), with the window's title. Any thread.</summary>
-    public event Action<string, bool>? SessionChanged;
+    /// <summary>A stream to a phone (device id) started (true) or ended (false), with the window's title. Any thread.</summary>
+    public event Action<string, string, bool>? SessionChanged;
+
+    /// <summary>How much bandwidth streams may use; read when each stream starts.</summary>
+    public StreamQuality Quality { get; set; } = StreamQuality.Auto;
 
     /// <summary>Resize streamed windows to the phone's shape (restored afterwards).</summary>
     public bool FitToPhone { get; set; } = true;
@@ -276,6 +280,7 @@ public sealed class WindowStreamService : IDisposable
         private bool _keyframeSent;
         private int _width = width, _height = height;
         private int _stopped;
+        private readonly BitrateLadder _bitrate = new(owner.Quality, owner._channels.IsRemote(deviceId), DateTimeOffset.UtcNow);
 
         public string SessionId { get; } = sessionId;
 
@@ -301,7 +306,7 @@ public sealed class WindowStreamService : IDisposable
                 // so a late viewer never waits.
                 _idleRefresh = new Timer(_ => RepeatLastFrame(), null, 100, 100);
                 owner._timeline.Mark(SessionId, "stream started");
-                owner.SessionChanged?.Invoke(title, true);
+                owner.SessionChanged?.Invoke(deviceId, title, true);
                 StartAudio();
             }
             catch (Exception ex)
@@ -318,6 +323,7 @@ public sealed class WindowStreamService : IDisposable
                 _capture?.Dispose();
                 _pipeline = owner.GetPipeline(deviceId, _width, _height);
                 _pipeline.Sink = this;
+                _pipeline.Encoder.SetBitrate(_bitrate.Bitrate);
                 _keyframeSent = false;
                 _pipeline.Encoder.RequestKeyframe();
 
@@ -358,6 +364,32 @@ public sealed class WindowStreamService : IDisposable
         }
 
         public void RequestKeyframe() => _pipeline?.Encoder.RequestKeyframe();
+
+        /// <summary>The phone couldn't keep up and video was dropped: use less.</summary>
+        public void FellBehind()
+        {
+            lock (_gate)
+            {
+                if (_bitrate.Dropped(DateTimeOffset.UtcNow) is { } lower)
+                {
+                    _pipeline?.Encoder.SetBitrate(lower);
+                    owner._diagnostics.Record(DiagnosticsCategory.Stream, "bitrate.down", $"{lower / 1_000_000.0:0.#} Mbps", deviceId);
+                }
+            }
+        }
+
+        /// <summary>After a while without drops, try more again.</summary>
+        private void AdaptBitrate()
+        {
+            lock (_gate)
+            {
+                if (_bitrate.Tick(DateTimeOffset.UtcNow) is { } higher)
+                {
+                    _pipeline?.Encoder.SetBitrate(higher);
+                    owner._diagnostics.Record(DiagnosticsCategory.Stream, "bitrate.up", $"{higher / 1_000_000.0:0.#} Mbps", deviceId);
+                }
+            }
+        }
 
         /// <summary>Resizes the window to the phone's shape (remembering where it was), or puts it back.</summary>
         public void SetFit(bool fit, bool restart = true)
@@ -421,6 +453,7 @@ public sealed class WindowStreamService : IDisposable
 
         private void RepeatLastFrame()
         {
+            AdaptBitrate();
             var now = _clock.Elapsed;
             var interval = now < TimeSpan.FromSeconds(2) ? TimeSpan.FromMilliseconds(100) : TimeSpan.FromMilliseconds(500);
             if (_lastNv12 is not { } nv12 || _pipeline is not { } pipeline || now - _lastFrame < interval || Volatile.Read(ref _stopped) != 0)
@@ -619,7 +652,7 @@ public sealed class WindowStreamService : IDisposable
 
             owner._sessions.TryRemove(new KeyValuePair<string, Session>(deviceId, this));
             owner._diagnostics.Record(DiagnosticsCategory.Stream, "stream.stopped", $"{title}: {reason}", deviceId);
-            owner.SessionChanged?.Invoke(title, false);
+            owner.SessionChanged?.Invoke(deviceId, title, false);
         }
     }
 }

@@ -86,12 +86,42 @@ public class AppMatcherTests
         var folder = Directory.CreateTempSubdirectory().FullName;
         var whatsapp = PhoneApp("com.whatsapp", "WhatsApp");
         var choice = new HandoffChoice(ChoiceKinds.Web, "WhatsApp on the web", Url: "https://web.whatsapp.com", Remember: true);
-        new AppDirectory(folder, new Baton.Host.DiagnosticsLog()).Remember(whatsapp, Platforms.Android, Platforms.Windows, choice);
+        new AppDirectory(folder, new Baton.Host.DiagnosticsLog()).Remember(whatsapp, Platforms.Android, Platforms.Windows, "pc", choice);
 
         var reloaded = new AppDirectory(folder, new Baton.Host.DiagnosticsLog());
-        Assert.Equal(choice with { Remember = false }, reloaded.Remembered(whatsapp, Platforms.Android, Platforms.Windows));
-        Assert.Null(reloaded.Remembered(whatsapp, Platforms.Android, Platforms.Android));
+        Assert.Equal(choice with { Remember = false }, reloaded.Remembered(whatsapp, Platforms.Android, Platforms.Windows, "pc"));
+        Assert.Null(reloaded.Remembered(whatsapp, Platforms.Android, Platforms.Android, "phone"));
         Assert.Equal("android:com.whatsapp->windows", Assert.Single(reloaded.Preferences).Key);
+    }
+
+    [Fact]
+    public void AYouTubeBuildIsRememberedPerPhone()
+    {
+        // RVX picked for the S25 must not pin the S21, which has ReVanced instead.
+        var directory = new AppDirectory(Directory.CreateTempSubdirectory().FullName, new Baton.Host.DiagnosticsLog());
+        directory.SetPhoneApps("s25", [new InstalledApp("app.rvx.android.youtube", "RVX")]);
+        directory.SetPhoneApps("s21", [new InstalledApp("app.revanced.android.youtube", "YouTube ReVanced")]);
+        var video = new Activity("tab:1:1", "pc", ActivityKind.WebMedia, "Video", new ActivityApp("Zen", "zen"), DateTimeOffset.UtcNow,
+            Url: "https://www.youtube.com/watch?v=abc", Content: new ActivityContent("youtube", "abc"));
+        directory.Remember(video, Platforms.Windows, Platforms.Android, "s25",
+            new HandoffChoice(ChoiceKinds.App, "RVX", "app.rvx.android.youtube", Remember: true));
+
+        Assert.Equal("app.rvx.android.youtube", directory.Remembered(video, Platforms.Windows, Platforms.Android, "s25")?.AppId);
+        Assert.Null(directory.Remembered(video, Platforms.Windows, Platforms.Android, "s21"));
+    }
+
+    [Fact]
+    public void ARememberedAppTheTargetLacksIsIgnored()
+    {
+        // Choices remembered before builds were kept per phone.
+        var folder = Directory.CreateTempSubdirectory().FullName;
+        var video = new Activity("tab:1:1", "pc", ActivityKind.WebMedia, "Video", new ActivityApp("Zen", "zen"), DateTimeOffset.UtcNow,
+            Content: new ActivityContent("youtube", "abc"));
+        File.WriteAllText(Path.Combine(folder, "app-preferences.json"),
+            "[{\"key\":\"windows:site:youtube->android\",\"sourceName\":\"YouTube\",\"choice\":{\"kind\":\"app\",\"label\":\"RVX\",\"appId\":\"app.rvx.android.youtube\",\"remember\":false}}]");
+        var directory = new AppDirectory(folder, new Baton.Host.DiagnosticsLog());
+        directory.SetPhoneApps("s21", [new InstalledApp("app.revanced.android.youtube", "YouTube ReVanced")]);
+        Assert.Null(directory.Remembered(video, Platforms.Windows, Platforms.Android, "s21"));
     }
 
     // Same JSON as dev.baton.android.apps.ChoiceWireTest decodes.

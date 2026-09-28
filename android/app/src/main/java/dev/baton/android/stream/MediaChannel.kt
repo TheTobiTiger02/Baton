@@ -134,7 +134,12 @@ object MediaChannel {
                     videoSink?.onRecord(header, payload)
                 }
                 StreamProtocol.CHANNEL_AUDIO -> audioSink?.onRecord(header, payload)
-                StreamProtocol.CHANNEL_CONTROL -> controlSink?.onRecord(header, payload)
+                // The PC's clipboard applies to whichever session is running; other input goes to it.
+                StreamProtocol.CHANNEL_CONTROL -> if (payload.firstOrNull()?.toInt() == ControlMessageCodec.TYPE_CLIPBOARD) {
+                    (runCatching { ControlMessageCodec.decode(payload) }.getOrNull() as? ControlMessage.Clipboard)?.let { ClipboardSync.onRemote(it.value) }
+                } else {
+                    controlSink?.onRecord(header, payload)
+                }
                 StreamProtocol.CHANNEL_META -> synchronized(bufferLock) {
                     val text = String(payload)
                     if (text.contains("\"format\"")) {

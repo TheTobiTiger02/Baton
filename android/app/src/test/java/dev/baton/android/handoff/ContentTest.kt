@@ -39,4 +39,14 @@ class ContentTest {
         assertEquals(7838, link.endpoints.single().port)
         assertEquals(link, PairingLink.parse(link.toUri()))
     }
+
+    @Test
+    fun samsungInternetAddressesAreCleanedAndHostOnlyIsSpotted() {
+        // Samsung Internet's bar: a left-to-right mark, then only the site until it is edited.
+        val shown = ContentLinks.normalizeUrl("‎gamepro.de")
+        assertEquals("https://gamepro.de", shown)
+        assertEquals(true, ContentLinks.isHostOnly(shown!!))
+        assertEquals(false, ContentLinks.isHostOnly("https://www.gamepro.de/artikel/ps-plus,3459717.html"))
+        assertEquals(false, ContentLinks.isHostOnly("https://example.com/?q=1"))
+    }
 }

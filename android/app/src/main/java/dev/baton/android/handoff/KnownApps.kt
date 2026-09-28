@@ -51,12 +51,13 @@ object KnownApps {
 
     /**
      * The package to open [app] in, among the usable builds: the one used last ([lastUsed]), else
-     * the most recently updated (a build someone keeps patching is the one they use), else the original.
+     * a patched build (someone who installed ReVanced uses it; the store keeps updating the stock
+     * app anyway, so update times say nothing), else the original.
      */
-    fun packageFor(app: KnownApp, isUsable: (String) -> Boolean, lastUsed: String?, lastUpdate: (String) -> Long): String {
+    fun packageFor(app: KnownApp, isUsable: (String) -> Boolean, lastUsed: String?): String {
         val usable = app.packages.filter(isUsable)
         return lastUsed?.takeIf { it in usable }
-            ?: usable.maxByOrNull(lastUpdate)
+            ?: usable.firstOrNull()
             ?: app.androidPackage
     }
 
@@ -100,10 +101,22 @@ object ContentLinks {
         return youTubeWatch(id, positionMs, url.contains("music.youtube.com", ignoreCase = true))
     }
 
+    /** Direction marks and zero-width characters: Samsung Internet puts one before the host. */
+    private val invisible = Regex("[\\u200B-\\u200F\\u202A-\\u202E\\u2066-\\u2069\\uFEFF]")
+
     /** Browsers show URLs without a scheme; put one back so the PC can open it. */
     fun normalizeUrl(text: String): String? {
-        val trimmed = text.trim()
+        val trimmed = text.replace(invisible, "").trim()
         if (trimmed.isBlank() || trimmed.contains(' ') || !trimmed.contains('.')) return null
         return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) trimmed else "https://$trimmed"
+    }
+
+    /**
+     * Only a site, no page: what Samsung Internet's bar shows while it isn't being edited. Opening
+     * that on the PC would land on the home page, so the full address is read first.
+     */
+    fun isHostOnly(url: String): Boolean {
+        val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return false
+        return uri.host != null && (uri.rawPath.isNullOrEmpty() || uri.rawPath == "/") && uri.rawQuery == null
     }
 }

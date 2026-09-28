@@ -243,6 +243,16 @@ object MediaSessions {
     fun lastUsed(provider: String): String? =
         appContext?.getSharedPreferences("baton_apps", Context.MODE_PRIVATE)?.getString("last_used_$provider", null)
 
+    /** A known app came to the front: that build is the one in use. */
+    fun noteForeground(packageName: String) {
+        val known = KnownApps.fromPackage(packageName) ?: return
+        if (!known.isBrowser) noteUsed(known.provider, packageName)
+    }
+
+    /** The session of whichever build of [app] has one, e.g. ReVanced rather than stock YouTube. */
+    fun controllerForApp(app: KnownApp): MediaController? =
+        refreshControllers().firstOrNull { it.packageName in app.packages || KnownApps.fromPackage(it.packageName) == app }
+
     private fun noteUsed(provider: String, packageName: String) {
         val prefs = appContext?.getSharedPreferences("baton_apps", Context.MODE_PRIVATE) ?: return
         if (prefs.getString("last_used_$provider", null) != packageName) prefs.edit().putString("last_used_$provider", packageName).apply()

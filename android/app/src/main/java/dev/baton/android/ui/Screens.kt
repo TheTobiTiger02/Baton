@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -78,6 +79,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -147,12 +149,25 @@ fun BatonApp(trust: TrustStore) {
     val paired = remember(status) { trust.isPaired }
     var showSettings by remember { mutableStateOf(false) }
     var setupDone by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val onboarding = remember { context.getSharedPreferences("onboarding", Context.MODE_PRIVATE) }
+    var toured by remember { mutableStateOf(onboarding.getBoolean("toured", false)) }
     val grants = rememberGrants()
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
         when {
             !paired && !setupDone && !grants.essentialsDone -> SetupScreen(grants, onContinue = { setupDone = true })
             !paired -> PairScreen()
+            !toured -> TourScreen(remember(status) { trust.host?.pcName }) {
+                onboarding.edit().putBoolean("toured", true).apply()
+                toured = true
+            }
+            // Tablets and unfolded phones: home and settings side by side.
+            LocalConfiguration.current.screenWidthDp >= 840 -> Row(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1.2f)) { HomeScreen(grants, onSettings = null) }
+                androidx.compose.material3.VerticalDivider()
+                Box(Modifier.weight(1f)) { SettingsScreen(trust, grants, onBack = null) }
+            }
             showSettings -> SettingsScreen(trust, grants, onBack = { showSettings = false })
             else -> HomeScreen(grants, onSettings = { showSettings = true })
         }
@@ -160,6 +175,41 @@ fun BatonApp(trust: TrustStore) {
     }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { ChoicePrompt.appVisible = true }
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { ChoicePrompt.appVisible = false }
+}
+
+// ---- Updates ----
+
+/** The installed version, and a newer release to install when there is one. */
+@Composable
+private fun UpdateCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val available by dev.baton.android.apps.AppUpdates.available.collectAsState()
+    var status by remember { mutableStateOf<String?>(null) }
+    Card(shape = RoundedCornerShape(Tokens.CardRadius),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(Tokens.Space4)) {
+            Text("Baton ${dev.baton.android.apps.AppUpdates.currentVersion}", style = MaterialTheme.typography.titleMedium)
+            Text(status ?: available?.let { "Version ${it.version} is available." } ?: "Updates come from Baton's GitHub releases.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(Tokens.Space3))
+            OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = {
+                scope.launch {
+                    val release = available ?: run {
+                        status = "Checking…"
+                        dev.baton.android.apps.AppUpdates.check()
+                    }
+                    status = when {
+                        release == null -> "Baton is up to date."
+                        available == null -> null
+                        else -> if (dev.baton.android.apps.AppUpdates.install(context, release)) "Downloading done. Confirm the install."
+                            else "The update couldn't be downloaded. Try again later."
+                    }
+                }
+            }) { Text(if (available != null) "Update to ${available!!.version}" else "Check for updates") }
+        }
+    }
 }
 
 // ---- Setup ----
@@ -175,6 +225,7 @@ private fun SetupScreen(grants: Grants, onContinue: () -> Unit) {
             Spacer(Modifier.height(Tokens.Space8))
             Image(painterResource(R.drawable.ic_launcher_foreground_art), contentDescription = null, modifier = Modifier.size(72.dp).clip(RoundedCornerShape(20.dp)))
             Spacer(Modifier.height(Tokens.Space5))
+            StepHeader(1, "Permissions")
             Text("Pick up where you left off", style = MaterialTheme.typography.displaySmall)
             Spacer(Modifier.height(Tokens.Space2))
             Text(
@@ -218,6 +269,61 @@ private fun PermissionSteps(grants: Grants, onlyMissing: Boolean = false) {
     }
 }
 
+/** "Step 2 of 3 · Pair", above each onboarding screen's title. */
+@Composable
+private fun StepHeader(number: Int, name: String) {
+    Text("Step $number of 3 · $name", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+    Spacer(Modifier.height(Tokens.Space2))
+}
+
+// ---- Tour ----
+
+/** The last onboarding step: the three ways to move something, shown once after pairing. */
+@Composable
+private fun TourScreen(pcName: String?, onDone: () -> Unit) {
+    val pc = pcName ?: "your PC"
+    LazyColumn(
+        contentPadding = PaddingValues(Tokens.Space6),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space3),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
+    ) {
+        item {
+            Spacer(Modifier.height(Tokens.Space6))
+            StepHeader(3, "How it works")
+            Text("You're connected to $pc", style = MaterialTheme.typography.headlineMedium)
+            Spacer(Modifier.height(Tokens.Space5))
+        }
+        item { TourCard(Icons.Rounded.Notifications, "From the notification",
+            "Baton's notification shows what you can move right now. Tap it: what plays here goes to $pc, or what $pc shows comes here.") }
+        item { TourCard(Icons.Rounded.Computer, "From your PC",
+            "Press Ctrl+Alt+→ on $pc to send what you're doing to this phone, and Ctrl+Alt+← to bring this phone's back.") }
+        item { TourCard(Icons.Rounded.Smartphone, "From any app",
+            "Share a video, song or page to Baton to open it on $pc.") }
+        item {
+            Spacer(Modifier.height(Tokens.Space4))
+            Button(onClick = onDone, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                Text("Start using Baton", style = MaterialTheme.typography.titleMedium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TourCard(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, text: String) {
+    Card(shape = RoundedCornerShape(Tokens.CardRadius),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(Tokens.Space4)) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(Tokens.Space4))
+            Column {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
 // ---- Pairing ----
 
 @Composable
@@ -251,6 +357,7 @@ private fun PairScreen() {
     ) {
         item {
             Spacer(Modifier.height(Tokens.Space6))
+            StepHeader(2, "Pair")
             Text("Pair with your PC", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.height(Tokens.Space2))
             Text(
@@ -354,7 +461,7 @@ private fun CodeDialog(pc: DiscoveredPc, onDismiss: () -> Unit, onPair: (String)
 // ---- Home ----
 
 @Composable
-private fun HomeScreen(grants: Grants, onSettings: () -> Unit) {
+private fun HomeScreen(grants: Grants, onSettings: (() -> Unit)?) {
     val status by Link.status.collectAsState()
     val peers by Link.peers.collectAsState()
     val local by HandoffEngine.local.collectAsState()
@@ -363,6 +470,9 @@ private fun HomeScreen(grants: Grants, onSettings: () -> Unit) {
     val ready = status.phase == LinkPhase.Ready
     var notice by remember { mutableStateOf<HandoffNotice?>(null) }
     var pickApp by remember { mutableStateOf(false) }
+    var showMore by remember { mutableStateOf(false) }
+    val updateAvailable by dev.baton.android.apps.AppUpdates.available.collectAsState()
+    val scope = rememberCoroutineScope()
     val preferences by Choices.preferences.collectAsState()
     val context = LocalContext.current
     if (pickApp) {
@@ -373,6 +483,7 @@ private fun HomeScreen(grants: Grants, onSettings: () -> Unit) {
     }
 
     LaunchedEffect(Unit) {
+        launch { dev.baton.android.apps.AppUpdates.check() }
         HandoffEngine.refresh()
         Link.notices.collect { incoming ->
             notice = incoming.copy(title = incoming.title.ifBlank { notice?.title.orEmpty() })
@@ -389,15 +500,28 @@ private fun HomeScreen(grants: Grants, onSettings: () -> Unit) {
         Box(Modifier.fillMaxSize().padding(padding)) {
             LazyColumn(
                 contentPadding = PaddingValues(start = Tokens.Space5, end = Tokens.Space5, top = Tokens.Space4, bottom = 120.dp),
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize().widthIn(max = 720.dp).align(Alignment.TopCenter)
             ) {
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Baton", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
-                        IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, contentDescription = "Settings") }
+                        if (onSettings != null) IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, contentDescription = "Settings") }
                     }
                     Spacer(Modifier.height(Tokens.Space2))
                     StatusPill(status, pc?.name)
+                }
+
+                updateAvailable?.let { release ->
+                    item {
+                        Card(shape = RoundedCornerShape(Tokens.CardRadius),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                            modifier = Modifier.fillMaxWidth().padding(top = Tokens.Space3)) {
+                            Row(Modifier.padding(start = Tokens.Space4, end = Tokens.Space2), verticalAlignment = Alignment.CenterVertically) {
+                                Text("Baton ${release.version} is available", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                TextButton(onClick = { scope.launch { dev.baton.android.apps.AppUpdates.install(context, release) } }) { Text("Update") }
+                            }
+                        }
+                    }
                 }
 
                 if (!grants.media || !grants.accessibility) {
@@ -407,68 +531,95 @@ private fun HomeScreen(grants: Grants, onSettings: () -> Unit) {
                     }
                 }
 
-                item { SectionTitle(if (pc != null) "On ${pc.name}" else "On your PC") }
+                // One "now": what the user most likely moves next. What this phone plays goes to the PC;
+                // otherwise what the PC has comes here. Everything else waits under More.
                 val pcActivities = pc?.activities.orEmpty()
-                if (pcActivities.isEmpty()) {
+                val localFirst = local.firstOrNull()?.playback?.playing == true || pcActivities.isEmpty()
+                val pcNow = pcActivities.firstOrNull()
+                val localNow = local.firstOrNull()
+
+                @Composable
+                fun PcCard(activity: dev.baton.android.protocol.Activity, hero: Boolean) {
+                    val streams = activity.kind == ActivityKind.WindowStream ||
+                        (activity.content?.provider == "unknown" && activity.window != null)
+                    ActivityCard(activity, if (streams) "Watch here" else "Continue here",
+                        if (streams) Icons.Rounded.Cast else Icons.Rounded.Smartphone,
+                        onAction = { HandoffEngine.continueWith(activity, pc!!.deviceId, Link.deviceId) },
+                        hero = hero, enabled = ready,
+                        choiceLabel = preferences.let { rememberedLabel(activity, pc!!.deviceId, Link.deviceId) },
+                        onChangeChoice = { HandoffEngine.continueWith(activity, pc!!.deviceId, Link.deviceId, ask = true) },
+                        // Only the "now" card carries remote controls; the rest stay one line of buttons.
+                        remote = if (hero) RemoteControl { action, position, volume -> HandoffEngine.command(pc!!.deviceId, activity.id, action, position, volume) } else null,
+                        secondaryAction = if (!streams && activity.window != null) {
+                            CardAction("Stream", Icons.Rounded.Cast) { HandoffEngine.pull(pc!!.deviceId, activity.id, activity.title, HandoffModes.STREAM) }
+                        } else null)
+                }
+
+                @Composable
+                fun LocalCard(activity: dev.baton.android.protocol.Activity, hero: Boolean) {
+                    ActivityCard(activity, "Continue on PC",
+                        Icons.Rounded.Computer,
+                        onAction = { HandoffEngine.continueWith(activity, Link.deviceId, Link.hostId) }, hero = hero, enabled = ready,
+                        secondaryAction = if (activity.kind != ActivityKind.WindowStream) {
+                            CardAction("Mirror", Icons.Rounded.Cast) { HandoffEngine.sendTo(activityId = activity.id, mode = HandoffModes.STREAM) }
+                        } else null,
+                        choiceLabel = preferences.let { rememberedLabel(activity, Link.deviceId, Link.hostId) },
+                        onChangeChoice = { HandoffEngine.continueWith(activity, Link.deviceId, Link.hostId, ask = true) })
+                }
+
+                val nowCards = buildList<Pair<String, @Composable (Boolean) -> Unit>> {
+                    val pcEntry = pcNow?.let { activity -> "On ${pc?.name ?: "your PC"}" to @Composable { hero: Boolean -> PcCard(activity, hero) } }
+                    val localEntry = localNow?.let { activity -> "On this phone" to @Composable { hero: Boolean -> LocalCard(activity, hero) } }
+                    if (localFirst) { localEntry?.let(::add); pcEntry?.let(::add) } else { pcEntry?.let(::add); localEntry?.let(::add) }
+                }
+                if (nowCards.isEmpty()) {
                     item {
-                        EmptyCard(if (ready) "Nothing playing or open on your PC right now." else "Connect to your PC to see what's on it.")
+                        SectionTitle("Now")
+                        EmptyCard(if (ready) "Play something or open a page here or on your PC, and it'll show up here, ready to move."
+                            else "Connect to your PC to see what's on it.")
                     }
                 }
-                pcActivities.forEachIndexed { index, activity ->
-                    item(key = "pc-${activity.id}") {
-                        Box(Modifier.padding(bottom = Tokens.Space3)) {
-                            val streams = activity.kind == ActivityKind.WindowStream ||
-                                (activity.content?.provider == "unknown" && activity.window != null)
-                            ActivityCard(activity, if (streams) "Watch here" else "Continue here",
-                                if (streams) Icons.Rounded.Cast else Icons.Rounded.Smartphone,
-                                onAction = { HandoffEngine.continueWith(activity, pc!!.deviceId, Link.deviceId) },
-                                hero = index == 0, enabled = ready,
-                                choiceLabel = preferences.let { rememberedLabel(activity, pc!!.deviceId, Link.deviceId) },
-                                onChangeChoice = { HandoffEngine.continueWith(activity, pc!!.deviceId, Link.deviceId, ask = true) },
-                                remote = RemoteControl { action, position, volume -> HandoffEngine.command(pc!!.deviceId, activity.id, action, position, volume) },
-                                secondaryAction = if (!streams && activity.window != null) {
-                                    CardAction("Stream", Icons.Rounded.Cast) { HandoffEngine.pull(pc!!.deviceId, activity.id, activity.title, HandoffModes.STREAM) }
-                                } else null)
-                        }
+                nowCards.forEachIndexed { index, (title, card) ->
+                    item(key = "now-$title") {
+                        SectionTitle(title)
+                        Box(Modifier.padding(bottom = Tokens.Space3)) { card(index == 0) }
                     }
                 }
 
-                otherPhones.forEach { phone ->
-                    item { SectionTitle("On ${phone.name}") }
-                    phone.activities.take(2).forEach { activity ->
-                        item(key = "${phone.deviceId}-${activity.id}") {
-                            Box(Modifier.padding(bottom = Tokens.Space3)) {
-                                ActivityCard(activity, "Continue here", Icons.Rounded.Smartphone,
-                                    onAction = { HandoffEngine.pull(phone.deviceId, activity.id, activity.title) }, enabled = ready,
-                                    remote = RemoteControl { action, position, volume -> HandoffEngine.command(phone.deviceId, activity.id, action, position, volume) })
+                val morePc = pcActivities.drop(1)
+                val moreLocal = local.drop(1)
+                val phoneItems = otherPhones.sumOf { it.activities.take(2).size }
+                item {
+                    TextButton(onClick = { showMore = !showMore }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (showMore) "Less" else if (morePc.size + moreLocal.size + phoneItems > 0) "More (${morePc.size + moreLocal.size + phoneItems})" else "More")
+                    }
+                }
+                if (showMore) {
+                    if (morePc.isNotEmpty()) item { SectionTitle("Also on ${pc?.name ?: "your PC"}") }
+                    morePc.forEach { activity ->
+                        item(key = "pc-${activity.id}") { Box(Modifier.padding(bottom = Tokens.Space3)) { PcCard(activity, false) } }
+                    }
+                    otherPhones.forEach { phone ->
+                        if (phone.activities.isNotEmpty()) item { SectionTitle("On ${phone.name}") }
+                        phone.activities.take(2).forEach { activity ->
+                            item(key = "${phone.deviceId}-${activity.id}") {
+                                Box(Modifier.padding(bottom = Tokens.Space3)) {
+                                    ActivityCard(activity, "Continue here", Icons.Rounded.Smartphone,
+                                        onAction = { HandoffEngine.pull(phone.deviceId, activity.id, activity.title) }, enabled = ready)
+                                }
                             }
                         }
                     }
-                }
-
-                item { SectionTitle("On this phone") }
-                if (local.isEmpty()) {
-                    item { EmptyCard("Play something or open a page, and it'll show up here, ready to send.") }
-                }
-                local.forEach { activity ->
-                    item(key = "local-${activity.id}") {
-                        Box(Modifier.padding(bottom = Tokens.Space3)) {
-                            ActivityCard(activity, "Continue on ${pc?.name ?: "PC"}",
-                                Icons.Rounded.Computer,
-                                onAction = { HandoffEngine.continueWith(activity, Link.deviceId, Link.hostId) }, enabled = ready,
-                                secondaryAction = if (activity.kind != ActivityKind.WindowStream) {
-                                    CardAction("Mirror", Icons.Rounded.Cast) { HandoffEngine.sendTo(activityId = activity.id, mode = HandoffModes.STREAM) }
-                                } else null,
-                                choiceLabel = preferences.let { rememberedLabel(activity, Link.deviceId, Link.hostId) },
-                                onChangeChoice = { HandoffEngine.continueWith(activity, Link.deviceId, Link.hostId, ask = true) })
-                        }
+                    if (moreLocal.isNotEmpty()) item { SectionTitle("Also on this phone") }
+                    moreLocal.forEach { activity ->
+                        item(key = "local-${activity.id}") { Box(Modifier.padding(bottom = Tokens.Space3)) { LocalCard(activity, false) } }
                     }
-                }
-                item {
-                    OutlinedButton(onClick = { pickApp = true }, enabled = ready, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Rounded.Apps, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(Tokens.Space2))
-                        Text("Continue another app on ${pc?.name ?: "PC"}…")
+                    item {
+                        OutlinedButton(onClick = { pickApp = true }, enabled = ready, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Rounded.Apps, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(Tokens.Space2))
+                            Text("Continue another app on ${pc?.name ?: "PC"}…")
+                        }
                     }
                 }
             }
@@ -512,12 +663,24 @@ private fun NoticeBanner(notice: HandoffNotice) {
 
 // ---- Settings ----
 
+/** The settings screens, reached from one list, as Android's own settings are. */
+private enum class SettingsPage(val title: String, val summary: String) {
+    Handoff("Handoff", "Suggestions when you pick up this phone"),
+    Sharing("Showing this phone", "How your PC shows this phone's screen"),
+    Choices("App choices", "Which app opens what you continue"),
+    Permissions("Permissions", "What Baton is allowed to do"),
+    About("About", "Your PC, version and updates")
+}
+
 @Composable
-private fun SettingsScreen(trust: TrustStore, grants: Grants, onBack: () -> Unit) {
+fun SettingsScreen(trust: TrustStore, grants: Grants, onBack: (() -> Unit)?) {
     val context = LocalContext.current
     var confirmForget by remember { mutableStateOf(false) }
+    var page by remember { mutableStateOf<SettingsPage?>(null) }
     val host = remember { trust.host }
-    androidx.activity.compose.BackHandler(onBack = onBack)
+    androidx.activity.compose.BackHandler(enabled = page != null || onBack != null) {
+        if (page != null) page = null else onBack?.invoke()
+    }
 
     LazyColumn(
         contentPadding = PaddingValues(Tokens.Space5),
@@ -526,47 +689,67 @@ private fun SettingsScreen(trust: TrustStore, grants: Grants, onBack: () -> Unit
     ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back") }
-                Text("Settings", style = MaterialTheme.typography.headlineMedium)
+                if (page != null || onBack != null) {
+                    IconButton(onClick = { if (page != null) page = null else onBack?.invoke() }) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                    }
+                }
+                Text(page?.title ?: "Settings", style = MaterialTheme.typography.headlineMedium)
             }
         }
-        item { SectionTitle("Paired PC") }
-        item {
-            Card(shape = RoundedCornerShape(Tokens.CardRadius),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
-                Column(Modifier.padding(Tokens.Space4)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.Computer, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(Tokens.Space4))
-                        Column(Modifier.weight(1f)) {
-                            Text(host?.pcName ?: "PC", style = MaterialTheme.typography.titleMedium)
-                            Text("This phone: ${trust.displayName}", style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        when (page) {
+            null -> SettingsPage.entries.forEach { entry ->
+                item(key = entry.name) {
+                    Card(shape = RoundedCornerShape(Tokens.CardRadius),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                        modifier = Modifier.fillMaxWidth().clickable { page = entry }) {
+                        Column(Modifier.padding(Tokens.Space4)) {
+                            Text(entry.title, style = MaterialTheme.typography.titleMedium)
+                            Text(entry.summary,
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    Spacer(Modifier.height(Tokens.Space3))
-                    HorizontalDivider()
-                    Spacer(Modifier.height(Tokens.Space2))
-                    OutlinedButton(onClick = { confirmForget = true }, modifier = Modifier.fillMaxWidth()) { Text("Forget this PC") }
                 }
             }
-        }
-        item { SectionTitle("Handoff") }
-        item { SuggestionSetting() }
-        item { ScreenSharingSetting() }
-        item { SectionTitle("App choices") }
-        item { AppChoicesList() }
-        item { SectionTitle("Permissions") }
-        item { PermissionSteps(grants) }
-        item {
-            if (BatteryOptimizationPrompt.isOneUi()) {
-                TextButton(onClick = { BatteryOptimizationPrompt.openOneUiSleepingApps(context) }) {
-                    Text("Samsung: keep Baton out of sleeping apps")
+            SettingsPage.Handoff -> item { SuggestionSetting() }
+            SettingsPage.Sharing -> item { ScreenSharingSetting() }
+            SettingsPage.Choices -> item { AppChoicesList() }
+            SettingsPage.Permissions -> {
+                item { PermissionSteps(grants) }
+                item {
+                    if (BatteryOptimizationPrompt.isOneUi()) {
+                        TextButton(onClick = { BatteryOptimizationPrompt.openOneUiSleepingApps(context) }) {
+                            Text("Samsung: keep Baton out of sleeping apps")
+                        }
+                    }
+                    TextButton(onClick = {
+                        context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
+                    }) { Text("Allow display over other apps (instant open without accessibility)") }
                 }
             }
-            TextButton(onClick = {
-                context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
-            }) { Text("Allow display over other apps (instant open without accessibility)") }
+            SettingsPage.About -> {
+              item {
+                Card(shape = RoundedCornerShape(Tokens.CardRadius),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+                    Column(Modifier.padding(Tokens.Space4)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Computer, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(Tokens.Space4))
+                            Column(Modifier.weight(1f)) {
+                                Text(host?.pcName ?: "PC", style = MaterialTheme.typography.titleMedium)
+                                Text("This phone: ${trust.displayName}", style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Spacer(Modifier.height(Tokens.Space3))
+                        HorizontalDivider()
+                        Spacer(Modifier.height(Tokens.Space2))
+                        OutlinedButton(onClick = { confirmForget = true }, modifier = Modifier.fillMaxWidth()) { Text("Forget this PC") }
+                    }
+                }
+            }
+              item { UpdateCard() }
+            }
         }
     }
 
@@ -579,7 +762,8 @@ private fun SettingsScreen(trust: TrustStore, grants: Grants, onBack: () -> Unit
                 TextButton(onClick = {
                     confirmForget = false
                     LinkService.forget(context)
-                    onBack()
+                    page = null
+                    onBack?.invoke()
                 }) { Text("Forget", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { confirmForget = false }) { Text("Cancel") } }

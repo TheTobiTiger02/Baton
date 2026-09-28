@@ -20,11 +20,15 @@ public partial class ToastWindow : Window
     }
 
     /// <summary>A suggestion with one button, e.g. continuing a phone's video on return.</summary>
-    public void ShowSuggestion(Activity activity, string heading, string actionLabel, Action onAction)
+    public void ShowSuggestion(Activity activity, string heading, string actionLabel, Action onAction) =>
+        ShowAction(heading, activity.Subtitle is { } subtitle ? $"{activity.Title} · {subtitle}" : activity.Title, "", actionLabel, onAction);
+
+    /// <summary>A notice with one button, e.g. an update that is ready.</summary>
+    public void ShowAction(string heading, string detail, string glyph, string actionLabel, Action onAction)
     {
         Heading.Text = heading;
-        Detail.Text = activity.Subtitle is { } subtitle ? $"{activity.Title} · {subtitle}" : activity.Title;
-        Glyph.Text = "";
+        Detail.Text = detail;
+        Glyph.Text = glyph;
         Badge.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, "AccentSubtleBrush");
         Glyph.SetResourceReference(ForegroundProperty, "AccentBrush");
         _action = onAction;

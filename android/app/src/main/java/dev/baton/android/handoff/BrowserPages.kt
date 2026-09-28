@@ -25,6 +25,8 @@ object BrowserPages {
     fun onForeground(packageName: String) {
         if (foregroundPackage == packageName) return
         foregroundPackage = packageName
+        // Opening a build of YouTube (or another known app) is using it, playing or not.
+        MediaSessions.noteForeground(packageName)
         handler.post { onChanged?.invoke() }
     }
 

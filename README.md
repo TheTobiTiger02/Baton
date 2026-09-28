@@ -97,7 +97,27 @@ screen lists everything you can continue in both directions. When you pick up th
 leaving the PC, Baton offers to continue what the PC was playing or showing, by the same rules
 (*Settings* → *Offer to continue from my PC*).
 
-## Setup
+## Install
+
+1. **PC:** download `Baton.App-win-Setup.exe` from the [latest release](https://github.com/TheTobiTiger02/Baton/releases/latest)
+   and run it. It installs for your user only (no admin prompt), adds Baton to the Start menu, starts
+   it, and keeps it up to date: new releases download in the background and a toast offers
+   *Restart to update*.
+2. **Phone:** in Baton on the PC choose *Pair a phone* and scan the small *No Baton on the phone yet?*
+   code with the phone's camera, or download `Baton.apk` from the release. Install it (Android asks
+   to allow installs from the browser once), open Baton and follow its three steps. The app also
+   updates itself from the releases (*Settings → About*).
+
+## Releasing
+
+`scripts\Release.ps1 -Version 1.2.3` builds the self-contained Windows installer with
+[Velopack](https://velopack.io) (`dotnet tool install -g vpk`), a signed release APK and publishes both
+as GitHub release `v1.2.3`; `-NoPublish` only builds. The APK is signed with the key named in
+`android\keystore.properties` (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`; never
+committed). Keep that key: phones only accept updates signed with the same one. The Zen/Firefox
+extension is not part of releases, since each build carries its PC's private browser token.
+
+## Setup from source
 
 1. **PC:** run `scripts\Install.ps1` after a build (`scripts\Build.ps1` does it for you). It installs to
    `%LOCALAPPDATA%\Programs\Baton`, adds **Baton** to the Start menu (so Windows search finds it) and

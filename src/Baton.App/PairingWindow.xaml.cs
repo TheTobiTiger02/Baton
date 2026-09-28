@@ -31,20 +31,29 @@ public partial class PairingWindow : Window
 
     private void Refresh_Click(object sender, RoutedEventArgs e) => NewCode();
 
-    private void NewCode()
+    /// <summary>The newest release's APK: a phone without Baton scans this first.</summary>
+    private const string ApkLink = Updates.Repository + "/releases/latest/download/Baton.apk";
+
+    private static BitmapImage Qr(string text)
     {
-        var link = _services.Host.OpenPairing();
-        _expiresAt = DateTimeOffset.UtcNow.AddMinutes(5);
-        CodeText.Text = $"{link.Code[..3]} {link.Code[3..]}";
         using var generator = new QRCodeGenerator();
-        using var data = generator.CreateQrCode(link.ToString(), QRCodeGenerator.ECCLevel.M);
+        using var data = generator.CreateQrCode(text, QRCodeGenerator.ECCLevel.M);
         var png = new PngByteQRCode(data).GetGraphic(8, drawQuietZones: false);
         var image = new BitmapImage();
         image.BeginInit();
         image.CacheOption = BitmapCacheOption.OnLoad;
         image.StreamSource = new MemoryStream(png);
         image.EndInit();
-        QrImage.Source = image;
+        return image;
+    }
+
+    private void NewCode()
+    {
+        AppQr.Source ??= Qr(ApkLink);
+        var link = _services.Host.OpenPairing();
+        _expiresAt = DateTimeOffset.UtcNow.AddMinutes(5);
+        CodeText.Text = $"{link.Code[..3]} {link.Code[3..]}";
+        QrImage.Source = Qr(link.ToString());
         QrImage.Opacity = 1;
         _countdown.Start();
         UpdateExpiry();

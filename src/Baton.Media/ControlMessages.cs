@@ -13,7 +13,8 @@ public enum ControlMessageType : byte
     KeyframeRequest = 0x08,
     Rotate = 0x09,
     MouseMove = 0x0B,
-    MouseButton = 0x0C
+    MouseButton = 0x0C,
+    Clipboard = 0x0D
 }
 
 public enum TouchAction : byte
@@ -71,6 +72,9 @@ public sealed record MouseMoveMessage(int Dx, int Dy) : ControlMessage;
 
 public sealed record MouseButtonMessage(MouseButton Button, KeyAction Action) : ControlMessage;
 
+/// <summary>Text copied on one side of a mirror or stream, for the other side's clipboard. Either direction.</summary>
+public sealed record ClipboardMessage(string Value) : ControlMessage;
+
 /// <summary>
 /// Input sent between the viewer and the device that is being shown, one message per media
 /// channel control record. Big-endian; <c>dev.baton.android.stream.ControlMessageCodec</c> is the
@@ -124,20 +128,9 @@ public static class ControlMessages
             }
 
             case TextMessage text:
-            {
-                var utf8 = Encoding.UTF8.GetBytes(text.Value);
-                if (utf8.Length > MaxTextBytes)
-                {
-                    throw new ArgumentException($"Text exceeds {MaxTextBytes} bytes.");
-                }
-
-                var bytes = new byte[1 + 4 + utf8.Length];
-                bytes[0] = (byte)ControlMessageType.Text;
-                BinaryPrimitives.WriteInt32BigEndian(bytes.AsSpan(1), utf8.Length);
-                utf8.CopyTo(bytes.AsSpan(5));
-                return bytes;
-            }
-
+                return EncodeText(ControlMessageType.Text, text.Value);
+            case ClipboardMessage clipboard:
+                return EncodeText(ControlMessageType.Clipboard, clipboard.Value);
             case NavigateMessage navigate:
                 return [(byte)ControlMessageType.Navigate, (byte)navigate.Target];
             case KeyframeRequestMessage:
@@ -191,7 +184,8 @@ public static class ControlMessages
                 BinaryPrimitives.ReadInt32BigEndian(body[1..]),
                 BinaryPrimitives.ReadInt32BigEndian(body[5..]),
                 BinaryPrimitives.ReadInt32BigEndian(body[9..])),
-            ControlMessageType.Text => ReadText(body),
+            ControlMessageType.Text => new TextMessage(ReadText(body)),
+            ControlMessageType.Clipboard => new ClipboardMessage(ReadText(body)),
             ControlMessageType.Navigate => new NavigateMessage((NavigationTarget)body[0]),
             ControlMessageType.KeyframeRequest => new KeyframeRequestMessage(),
             ControlMessageType.Rotate => new RotateMessage(body[0]),
@@ -203,7 +197,26 @@ public static class ControlMessages
         };
     }
 
-    private static TextMessage ReadText(ReadOnlySpan<byte> body)
+    /// <summary>Whether text fits a message; longer clipboard contents are not synced.</summary>
+    public static bool FitsText(string value) => Encoding.UTF8.GetByteCount(value) <= MaxTextBytes;
+
+    /// <summary>Type, big-endian UTF-8 length, the UTF-8 bytes: the layout text and clipboard share.</summary>
+    private static byte[] EncodeText(ControlMessageType type, string value)
+    {
+        var utf8 = Encoding.UTF8.GetBytes(value);
+        if (utf8.Length > MaxTextBytes)
+        {
+            throw new ArgumentException($"Text exceeds {MaxTextBytes} bytes.");
+        }
+
+        var bytes = new byte[1 + 4 + utf8.Length];
+        bytes[0] = (byte)type;
+        BinaryPrimitives.WriteInt32BigEndian(bytes.AsSpan(1), utf8.Length);
+        utf8.CopyTo(bytes.AsSpan(5));
+        return bytes;
+    }
+
+    private static string ReadText(ReadOnlySpan<byte> body)
     {
         var length = BinaryPrimitives.ReadInt32BigEndian(body);
         if (length < 0 || length > MaxTextBytes || length > body.Length - 4)
@@ -211,6 +224,6 @@ public static class ControlMessages
             throw new InvalidDataException($"Control text length {length} is out of range.");
         }
 
-        return new TextMessage(Encoding.UTF8.GetString(body.Slice(4, length)));
+        return Encoding.UTF8.GetString(body.Slice(4, length));
     }
 }

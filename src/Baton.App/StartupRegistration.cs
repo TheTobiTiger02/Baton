@@ -53,10 +53,13 @@ internal static class StartupRegistration
             }
 
             var registered = command.StartsWith('"') ? command[1..Math.Max(1, command.IndexOf('"', 1))] : command.Split(' ')[0];
-            var installed = Path.GetFullPath(Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Baton"));
-            var isInstalledCopy = Environment.ProcessPath is { } current
-                && current.StartsWith(installed + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            // Installed by scripts\Install.ps1, or by Setup.exe (Velopack).
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var isInstalledCopy = Environment.ProcessPath is { } current && new[]
+            {
+                Path.GetFullPath(Path.Combine(localAppData, "Programs", "Baton")),
+                Path.GetFullPath(Path.Combine(localAppData, Updates.PackageId))
+            }.Any(installed => current.StartsWith(installed + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
             if (isInstalledCopy || !File.Exists(registered))
             {
                 SetEnabled(enabled: true, rememberUserChoice: false);

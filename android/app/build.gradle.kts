@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -13,18 +15,40 @@ android {
         applicationId = "dev.baton.android"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        // scripts\Release.ps1 passes the release version (-PbatonVersion=1.2.3); the code follows from it.
+        val version = (project.findProperty("batonVersion") as String?) ?: "0.1.0"
+        val (major, minor, patch) = version.split('.').map { it.toInt() }
+        versionCode = major * 10_000 + minor * 100 + patch
+        versionName = version
+    }
+
+    // Release APKs are signed with the key named in android/keystore.properties (never committed):
+    // storeFile, storePassword, keyAlias, keyPassword. Every release must use the same key, or
+    // phones can't update from one to the next.
+    val keystore = rootProject.file("keystore.properties").takeIf { it.exists() }?.let { file ->
+        Properties().apply { file.inputStream().use { load(it) } }
+    }
+    signingConfigs {
+        if (keystore != null) {
+            create("release") {
+                storeFile = rootProject.file(keystore.getProperty("storeFile"))
+                storePassword = keystore.getProperty("storePassword")
+                keyAlias = keystore.getProperty("keyAlias")
+                keyPassword = keystore.getProperty("keyPassword")
+            }
+        }
     }
 
     buildFeatures {
         compose = true
         aidl = true
+        buildConfig = true
     }
 
     buildTypes {
         getByName("release") {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

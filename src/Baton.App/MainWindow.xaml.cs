@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 
 namespace Baton.App;
 
@@ -17,11 +18,10 @@ public partial class MainWindow : Window
         WindowBackdrop.Attach(this);
         StartupToggle.IsChecked = StartupRegistration.IsEnabled;
         SuggestToggle.IsChecked = UserSettings.SuggestOnReturn;
-        if (services.HotkeyProblems.Count > 0)
-        {
-            HotkeyWarning.Visibility = Visibility.Visible;
-            HotkeyWarningText.Text = $"Another app already uses {string.Join(", ", services.HotkeyProblems)}. Close it and restart Baton to use that shortcut.";
-        }
+        ShowHotkeyProblems();
+        VersionText.Text = $"Baton {services.Updates.CurrentVersion}";
+        QualityChoice.SelectedItem = QualityChoice.Items.OfType<ComboBoxItem>()
+            .First(item => (string)item.Tag == UserSettings.StreamQuality.ToString());
 
         IsVisibleChanged += (_, _) => UpdateDiagnosticsSummary();
         services.Runtime.Browser.Changed += () => Dispatcher.BeginInvoke(UpdateExtensionStatus);
@@ -29,6 +29,8 @@ public partial class MainWindow : Window
         services.Runtime.Apps.PreferencesChanged += () => Dispatcher.BeginInvoke(UpdateAppChoices);
         UpdateAppChoices();
     }
+
+    public void ShowSettings() => NavSettings.IsChecked = true;
 
     private void UpdateAppChoices()
     {
@@ -88,6 +90,105 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void Update_Click(object sender, RoutedEventArgs e)
+    {
+        if (_services.Updates.ReadyVersion is not null)
+        {
+            _services.Updates.RestartToUpdate();
+            return;
+        }
+
+        UpdateButton.IsEnabled = false;
+        UpdateStatus.Text = "Checking…";
+        UpdateStatus.Text = await _services.CheckForUpdatesAsync();
+        UpdateButton.Content = _services.Updates.ReadyVersion is not null ? "Restart to update" : "Check for updates";
+        UpdateButton.IsEnabled = true;
+    }
+
+    private void QualityChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (QualityChoice.SelectedItem is ComboBoxItem { Tag: string tag } && Enum.TryParse<Baton.Host.Streaming.StreamQuality>(tag, out var quality))
+        {
+            UserSettings.StreamQuality = quality;
+            _services.Host.WindowStreams.Quality = quality;
+        }
+    }
+
+    private void MakeDefault_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is DeviceViewModel phone)
+        {
+            _services.MakeDefault(phone.DeviceId);
+        }
+    }
+
+    private Button? _capturing;
+
+    /// <summary>A shortcut button waits for the new combination after a click.</summary>
+    private void Hotkey_Click(object sender, RoutedEventArgs e)
+    {
+        _capturing = (Button)sender;
+        _capturing.Content = "Press keys…";
+        _capturing.Focus();
+    }
+
+    private void Hotkey_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (!ReferenceEquals(sender, _capturing))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        var action = Enum.Parse<HotkeyAction>((string)_capturing.Tag);
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key == Key.Escape)
+        {
+            EndCapture();
+            return;
+        }
+
+        Hotkey? hotkey = key == Key.Back ? null : Hotkey.FromKeyEvent(key, Keyboard.Modifiers);
+        if (hotkey is null && key != Key.Back)
+        {
+            return; // Only modifiers so far, or a key without one.
+        }
+
+        var bound = _services.Rebind(action, hotkey);
+        EndCapture();
+        ShowHotkeyProblems(bound ? null : $"Another app already uses {hotkey}. Pick a different shortcut.");
+    }
+
+    private void Hotkey_LostFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (ReferenceEquals(sender, _capturing))
+        {
+            EndCapture();
+        }
+    }
+
+    private void EndCapture()
+    {
+        var button = _capturing;
+        _capturing = null;
+        // The binding was replaced by "Press keys…"; restore it.
+        button?.SetBinding(ContentControl.ContentProperty, (string)button.Tag switch
+        {
+            nameof(HotkeyAction.SendToPhone) => nameof(ShellViewModel.SendHotkey),
+            nameof(HotkeyAction.ContinueHere) => nameof(ShellViewModel.ContinueHotkey),
+            _ => nameof(ShellViewModel.ChooseHotkey)
+        });
+    }
+
+    private void ShowHotkeyProblems(string? problem = null)
+    {
+        problem ??= _services.HotkeyProblems.Count > 0
+            ? $"Another app already uses {string.Join(", ", _services.HotkeyProblems)}. Close it and restart Baton, or pick a different shortcut."
+            : null;
+        HotkeyWarning.Visibility = problem is null ? Visibility.Collapsed : Visibility.Visible;
+        HotkeyWarningText.Text = problem;
+    }
+
     private void SuggestToggle_Click(object sender, RoutedEventArgs e) =>
         UserSettings.SuggestOnReturn = SuggestToggle.IsChecked == true;
 
@@ -129,6 +230,12 @@ public partial class MainWindow : Window
         {
             return;
         }
+
+        // How long the last handoffs took to open, so "instant" can be checked.
+        RecentHandoffs.Text = string.Join(Environment.NewLine, _services.Host.Timeline.Recent(5)
+            .Where(handoff => handoff.Stages.Count > 1)
+            .Select(handoff => $"{handoff.StartedAt.ToLocalTime():HH:mm:ss}  {string.Join(" → ", handoff.Stages.Skip(1).Select(stage => $"{stage.Stage} {stage.Ms} ms"))}"));
+        RecentHandoffs.Visibility = RecentHandoffs.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
         var entries = _services.Host.Diagnostics.Snapshot(1);
         DiagnosticsSummary.Text = entries.Count == 0

@@ -42,6 +42,9 @@ internal sealed class PhoneWindow : Window
     private bool _pointerDown;
     private bool _closedByPhone;
 
+    /// <summary>The phone's mirror session is running and listens for input (and the clipboard).</summary>
+    public event Action? PhoneReady;
+
     public PhoneWindow(BatonHost host, string deviceId, string phoneName, Activity activity, StreamOffer offer)
     {
         _host = host;
@@ -318,6 +321,7 @@ internal sealed class PhoneWindow : Window
             case "input":
                 _inputReady = root.TryGetProperty("ready", out var ready) && ready.GetBoolean();
                 Dispatcher.BeginInvoke(ShowStatus);
+                Dispatcher.BeginInvoke(() => PhoneReady?.Invoke());
                 break;
         }
     }

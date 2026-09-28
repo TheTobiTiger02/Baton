@@ -43,7 +43,14 @@ public sealed class MediaOpener(
 
     private static readonly TimeSpan ReconcileTimeout = TimeSpan.FromSeconds(25);
 
-    public async Task<OpenResult?> TryOpenAsync(Activity activity, CancellationToken cancellationToken)
+    public Task<OpenResult?> TryOpenAsync(Activity activity, CancellationToken cancellationToken) =>
+        TryOpenAsync(activity, browserExe: null, cancellationToken);
+
+    /// <summary>
+    /// Opens the activity at its position; web links go to <paramref name="browserExe"/> when one
+    /// was picked for it, else to the default handler.
+    /// </summary>
+    public async Task<OpenResult?> TryOpenAsync(Activity activity, string? browserExe, CancellationToken cancellationToken)
     {
         if (activity.Kind is not (ActivityKind.WebPage or ActivityKind.WebMedia or ActivityKind.AppMedia))
         {
@@ -79,7 +86,9 @@ public sealed class MediaOpener(
             expectBrowserSeek?.Invoke(target, positionMs);
         }
 
-        Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+        Process.Start(browserExe is not null && target.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+            ? new ProcessStartInfo(browserExe) { UseShellExecute = false, ArgumentList = { target } }
+            : new ProcessStartInfo(target) { UseShellExecute = true });
 
         if (activity.Playback is not null && result.Status == HandoffStatus.Opened)
         {

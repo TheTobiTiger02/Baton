@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Installs Baton's own updates from its GitHub releases; Android asks the user each time. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
@@ -168,6 +170,10 @@
 
         <receiver
             android:name=".remote.PcRemoteReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".apps.UpdateInstallReceiver"
             android:exported="false" />
 
         <receiver

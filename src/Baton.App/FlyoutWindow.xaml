@@ -22,7 +22,7 @@
                     <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ActivityArt}" Tag="44" Focusable="False" VerticalAlignment="Top" />
                     <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
-                        <TextBlock Text="{Binding StateText}" Style="{StaticResource CaptionText}" />
+                        <TextBlock Text="{Binding StatusLine}" Style="{StaticResource CaptionText}" />
                         <Border Style="{StaticResource ProgressTrack}" Height="3" Margin="0,6,0,0"
                                 Visibility="{Binding HasPlayback, Converter={StaticResource BoolToVisConverter}}">
                             <Border CornerRadius="1.5" Background="{DynamicResource AccentBrush}" RenderTransformOrigin="0,0.5">
@@ -32,22 +32,13 @@
                             </Border>
                         </Border>
                     </StackPanel>
-                    <ItemsControl Grid.Row="1" Grid.ColumnSpan="2" ItemsSource="{Binding Actions}" Margin="0,8,0,0" Focusable="False">
+                    <ItemsControl Grid.Row="1" Grid.ColumnSpan="2" ItemsSource="{Binding Buttons}" ItemTemplate="{StaticResource ActionItem}"
+                                  Margin="0,8,0,0" Focusable="False" ButtonBase.Click="Action_Click">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <WrapPanel />
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="{x:Type app:ActivityAction}">
-                                <Button Command="{Binding Command}" Style="{StaticResource ActionButton}" Margin="0,0,6,0" Click="Action_Click">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="{Binding Glyph}" Style="{StaticResource IconGlyph}" FontSize="13" Margin="0,0,6,0" />
-                                        <TextBlock Text="{Binding Label}" FontSize="13" />
-                                    </StackPanel>
-                                </Button>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </Grid>
             </Border>
@@ -91,8 +82,9 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
-            <TextBlock Style="{StaticResource CaptionText}" Foreground="{DynamicResource TextTertiaryBrush}" TextWrapping="Wrap" Margin="0,12,0,0"
-                       Text="Ctrl+Alt+→ sends to your phone · Ctrl+Alt+← continues here" />
+            <TextBlock Style="{StaticResource CaptionText}" Foreground="{DynamicResource TextTertiaryBrush}" TextWrapping="Wrap" Margin="0,12,0,0">
+                <Run Text="{Binding SendHotkey, Mode=OneWay}" /><Run Text=" sends to your phone · " /><Run Text="{Binding ContinueHotkey, Mode=OneWay}" /><Run Text=" continues here" />
+            </TextBlock>
         </StackPanel>
     </Border>
 </Window>

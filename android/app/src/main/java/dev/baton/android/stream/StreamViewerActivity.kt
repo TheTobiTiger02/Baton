@@ -107,6 +107,8 @@ class StreamViewerActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Copies travel between this phone and the PC while its window is shown here.
+        ClipboardSync.start(this)
         current = WeakReference(this)
         readIntent(intent)
         // Creating a decoder takes a while on some phones: do it while the window is still coming up.
@@ -156,6 +158,7 @@ class StreamViewerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        ClipboardSync.stop()
         if (current?.get() === this) current = null
         closing = true
         MediaChannel.attachVideo(null)
