@@ -110,12 +110,19 @@ leaving the PC, Baton offers to continue what the PC was playing or showing, by 
 
 ## Releasing
 
-`scripts\Release.ps1 -Version 1.2.3` builds the self-contained Windows installer with
-[Velopack](https://velopack.io) (`dotnet tool install -g vpk`), a signed release APK and publishes both
-as GitHub release `v1.2.3`; `-NoPublish` only builds. The APK is signed with the key named in
-`android\keystore.properties` (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`; never
-committed). Keep that key: phones only accept updates signed with the same one. The Zen/Firefox
-extension is not part of releases, since each build carries its PC's private browser token.
+Every push to `main` is released automatically (`.github/workflows/release.yml`): version
+`major.minor` from `Directory.Build.props` plus the workflow's run number (0.2.14, 0.2.15, …). The
+workflow builds the self-contained Windows installer with [Velopack](https://velopack.io) and the
+signed APK, and publishes both as a GitHub release, which installed copies then update to. Pushes
+that only touch Markdown or `docs/` are not released; raise `major.minor` in `Directory.Build.props`
+for a bigger step.
+
+The APK is signed with the key in the repository secrets `ANDROID_KEYSTORE_BASE64`,
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` (locally:
+`android/keystore.properties`, never committed). Keep that key: phones only accept updates signed
+with the same one. `scripts/Release.ps1 -Version 1.2.3 [-NoPublish]` does the same by hand
+(needs `dotnet tool install -g vpk`). The Zen/Firefox extension is not part of releases, since each
+build carries its PC's private browser token.
 
 ## Setup from source
 

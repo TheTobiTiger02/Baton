@@ -18,7 +18,8 @@ android {
         // scripts\Release.ps1 passes the release version (-PbatonVersion=1.2.3); the code follows from it.
         val version = (project.findProperty("batonVersion") as String?) ?: "0.1.0"
         val (major, minor, patch) = version.split('.').map { it.toInt() }
-        versionCode = major * 10_000 + minor * 100 + patch
+        // Room for 10,000 patch releases per minor version: CI numbers each push.
+        versionCode = major * 10_000_000 + minor * 10_000 + patch
         versionName = version
     }
 

@@ -1,0 +1,90 @@
+# Every push to main becomes a release that installed copies update to: the Windows installer and
+# update files, and the signed APK (scripts/Release.ps1 does the work, as it would locally).
+#
+# The version is major.minor from Directory.Build.props plus this workflow's run number, so each
+# release is newer than the last; change major.minor there for a bigger step.
+#
+# Repository secrets (Settings > Secrets and variables > Actions):
+#   ANDROID_KEYSTORE_BASE64   the release .jks, base64-encoded
+#   ANDROID_KEYSTORE_PASSWORD its password
+#   ANDROID_KEY_ALIAS         the key's alias
+#   ANDROID_KEY_PASSWORD      the key's password
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# One release at a time, in push order.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          $props = [xml](Get-Content Directory.Build.props)
+          $base = [version]$props.Project.PropertyGroup.Version
+          "value=$($base.Major).$($base.Minor).$env:GITHUB_RUN_NUMBER" >> $env:GITHUB_OUTPUT
+
+      - name: Signing key
+        shell: pwsh
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if (-not $env:KEYSTORE) { throw 'The ANDROID_KEYSTORE_BASE64 secret is missing.' }
+          $jks = Join-Path $env:RUNNER_TEMP 'release.jks'
+          [IO.File]::WriteAllBytes($jks, [Convert]::FromBase64String($env:KEYSTORE))
+          # .properties reads a backslash as an escape: double any in the values.
+          function Escape($value) { $value.Replace('\', '\\') }
+          @(
+            "storeFile=$($jks.Replace('\', '/'))"
+            "storePassword=$(Escape $env:STORE_PASSWORD)"
+            "keyAlias=$(Escape $env:KEY_ALIAS)"
+            "keyPassword=$(Escape $env:KEY_PASSWORD)"
+          ) | Set-Content android/keystore.properties -Encoding utf8
+
+      - name: Velopack
+        shell: pwsh
+        run: |
+          dotnet tool install -g vpk
+          Join-Path $env:USERPROFILE '.dotnet/tools' >> $env:GITHUB_PATH
+
+      - name: Build and publish
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/Release.ps1 -Version ${{ steps.version.outputs.value }}
+
+      - name: Remove the signing key
+        if: always()
+        shell: pwsh
+        run: Remove-Item android/keystore.properties, (Join-Path $env:RUNNER_TEMP 'release.jks') -ErrorAction SilentlyContinue

@@ -5,6 +5,7 @@
 # (Build-ZenExtension.ps1), so each PC needs its own.
 # Needs: the GitHub CLI signed in (gh auth login), Velopack's tool (dotnet tool install -g vpk),
 # and android\keystore.properties. -NoPublish builds everything but leaves GitHub alone.
+# .github\workflows\release.yml runs this on every push to main.
 param(
     [Parameter(Mandatory)][string]$Version,
     [switch]$NoPublish
@@ -38,7 +39,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Windows build failed.' }
 
 # The previous release lets Velopack make a small delta update; the first release has none.
 $packages = Join-Path $out 'velopack'
-vpk download github --repoUrl $repository --outputDir $packages 2>$null
+$token = if ($env:GITHUB_TOKEN) { @('--token', $env:GITHUB_TOKEN) } else { @() }
+vpk download github --repoUrl $repository --outputDir $packages @token 2>$null
 vpk pack --packId $packId --packVersion $Version --packDir $windows --mainExe 'Baton.exe' --packTitle 'Baton' `
     --icon (Join-Path $root 'src\Baton.App\Assets\Baton.ico') --outputDir $packages
 if ($LASTEXITCODE -ne 0) { throw 'Packing the Windows installer failed.' }
@@ -59,5 +61,7 @@ Write-Host "Release $Version built:"
 $assets | ForEach-Object { Write-Host "  $_" }
 
 if ($NoPublish) { return }
-gh release create "v$Version" @assets --repo $repository --title "Baton $Version" --generate-notes
+# In CI the release is tagged on the commit that was pushed, not whatever main is by then.
+$target = if ($env:GITHUB_SHA) { @('--target', $env:GITHUB_SHA) } else { @() }
+gh release create "v$Version" @assets --repo $repository --title "Baton $Version" --generate-notes @target
 if ($LASTEXITCODE -ne 0) { throw 'Publishing the release failed.' }
