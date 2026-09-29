@@ -79,6 +79,14 @@ internal sealed class AppServices : IDisposable
                 () => _ = Coordinator.PullAsync(phone.DeviceId, activity.Id));
         });
 
+        // A browser extension without a token asks once; allowing it here gives it one.
+        Runtime.Browser.ApprovalRequested += (connectionId, browser) => _app.Dispatcher.BeginInvoke(() =>
+        {
+            _toast ??= new ToastWindow();
+            _toast.ShowAction($"Allow {browser} to connect?", $"The Baton extension in {browser} wants to show its tabs here.", "\uE774",
+                "Allow", () => _ = Runtime.Browser.ApproveAsync(connectionId));
+        });
+
         _hotkeys = new HotkeyManager();
         RegisterHotkeys();
         CreateTray();

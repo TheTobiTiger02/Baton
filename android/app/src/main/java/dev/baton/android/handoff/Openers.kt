@@ -84,6 +84,7 @@ object Openers {
             "youtube", "youtubemusic", "web", "unknown" -> openYouTube(context, activity, content.provider, positionMs, pinned)
             "spotify" -> openMusic(context, activity, KnownApps.fromProvider("spotify")!!, query, positionMs, content.id, pinned)
             "netflix", "disney", "prime" -> openVideoService(context, activity, KnownApps.fromProvider(content.provider)!!)
+            "stremio" -> openStremio(context, activity, content.id)
             else -> {
                 val intent = playFromSearch(query, activity.title, artist)
                 if (Launcher.start(context, intent, activity.title)) {
@@ -97,17 +98,18 @@ object Openers {
 
     private fun openUrl(context: Context, activity: Activity, url: String, positionMs: Long, pinned: String? = null): OpenResult {
         val videoId = ContentLinks.youTubeVideoId(url)
-        val target = if (videoId != null) ContentLinks.withYouTubeTime(url, positionMs) else url
+        val target = if (videoId != null) ContentLinks.withYouTubeTime(url, positionMs) else ContentLinks.withTwitchTime(url, positionMs)
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(target))
         val appPackage = when {
-            videoId == null -> null
+            videoId == null -> pinned ?: LinkApps.appFor(context, target)
             url.contains("music.youtube.com") -> KnownApps.fromProvider("youtubemusic")?.let { installedPackage(context, it, pinned) }
             else -> KnownApps.fromProvider("youtube")?.let { installedPackage(context, it, pinned) }
         }
         if (appPackage != null && isUsable(context, appPackage)) intent.setPackage(appPackage)
         // Also for YouTube links with a time: an app already showing that video (paused) only
         // moves there and stays paused, so the session is made to play at the right second.
-        launch(context, intent, activity, appPackage, positionMs.takeIf { activity.playback != null })
+        // Live streams have no second to move to.
+        launch(context, intent, activity, appPackage, positionMs.takeIf { activity.playback?.durationMs?.let { it > 0 } == true })
         return OpenResult(HandoffStatus.Opened)
     }
 
@@ -147,6 +149,20 @@ object Openers {
         }
         launch(context, intent, activity, appPackage, positionMs)
         return OpenResult(HandoffStatus.Opened)
+    }
+
+    /**
+     * Stremio shows the title (and episode, when known) and resumes from the progress it keeps
+     * with the account. Baton passes no stream: what plays is the user's own choice in Stremio.
+     */
+    private fun openStremio(context: Context, activity: Activity, id: String?): OpenResult {
+        val app = KnownApps.fromProvider("stremio")!!
+        if (!isUsable(context, app.androidPackage)) {
+            return OpenResult(HandoffStatus.Failed, "Stremio isn't installed on this phone. Choose \"Stream the window\" instead.")
+        }
+        val link = if (id != null) "stremio:///detail/$id" else "stremio:///search?search=" + Uri.encode(activity.title)
+        Launcher.start(context, Intent(Intent.ACTION_VIEW, Uri.parse(link)).setPackage(app.androidPackage), activity.title)
+        return OpenResult(HandoffStatus.Fallback, "Opened ${activity.title} in Stremio: it continues where your account says you stopped.")
     }
 
     private fun openVideoService(context: Context, activity: Activity, app: KnownApp): OpenResult {

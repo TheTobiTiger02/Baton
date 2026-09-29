@@ -18,6 +18,7 @@ public partial class MainWindow : Window
         WindowBackdrop.Attach(this);
         StartupToggle.IsChecked = StartupRegistration.IsEnabled;
         AudioToggle.IsChecked = UserSettings.StreamAudio;
+        ShortcutToggle.IsChecked = WelcomeShortcut.IsChecked = DesktopShortcut.Exists;
         SuggestToggle.IsChecked = UserSettings.SuggestOnReturn;
         ShowHotkeyProblems();
         Welcome.Visibility = UserSettings.Welcomed ? Visibility.Collapsed : Visibility.Visible;
@@ -27,6 +28,7 @@ public partial class MainWindow : Window
 
         IsVisibleChanged += (_, _) => UpdateDiagnosticsSummary();
         services.Runtime.Browser.Changed += () => Dispatcher.BeginInvoke(UpdateExtensionStatus);
+        services.Runtime.Browser.ApprovalRequested += (_, _) => Dispatcher.BeginInvoke(UpdateExtensionStatus);
         UpdateExtensionStatus();
         services.Runtime.Apps.PreferencesChanged += () => Dispatcher.BeginInvoke(UpdateAppChoices);
         UpdateAppChoices();
@@ -115,6 +117,12 @@ public partial class MainWindow : Window
             UserSettings.StreamQuality = quality;
             _services.Host.WindowStreams.Quality = quality;
         }
+    }
+
+    private void Shortcut_Click(object sender, RoutedEventArgs e)
+    {
+        DesktopShortcut.Set(((CheckBox)sender).IsChecked == true);
+        ShortcutToggle.IsChecked = WelcomeShortcut.IsChecked = DesktopShortcut.Exists;
     }
 
     private void WelcomeSettings_Click(object sender, RoutedEventArgs e) => ShowSettings();
@@ -223,14 +231,43 @@ public partial class MainWindow : Window
         StartupRegistration.SetEnabled(StartupToggle.IsChecked == true);
         StartupToggle.IsChecked = StartupRegistration.IsEnabled;
         AudioToggle.IsChecked = UserSettings.StreamAudio;
+        ShortcutToggle.IsChecked = WelcomeShortcut.IsChecked = DesktopShortcut.Exists;
     }
 
     private void UpdateExtensionStatus()
     {
-        var browsers = _services.Runtime.Browser.ConnectedBrowsers;
+        var bridge = _services.Runtime.Browser;
+        var browsers = bridge.ConnectedBrowsers;
         ExtensionStatus.Text = browsers.Count > 0
             ? $"Connected: {string.Join(", ", browsers)}"
             : "Not connected. Add it to your browser to hand over tabs exactly.";
+        PendingBrowsers.ItemsSource = bridge.PendingApprovals.Select(pending => new { pending.ConnectionId, pending.Browser }).ToArray();
+        AllowedBrowsers.ItemsSource = bridge.Approvals?.Approved
+            .Select(browser => new { browser.Id, browser.Browser, Since = $"on {browser.ApprovedAt.ToLocalTime():d}" }).ToArray();
+    }
+
+    private async void AllowBrowser_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string connectionId })
+        {
+            await _services.Runtime.Browser.ApproveAsync(connectionId);
+            UpdateExtensionStatus();
+        }
+    }
+
+    private void RemoveBrowser_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string id })
+        {
+            _services.Runtime.Browser.Approvals?.Revoke(id);
+            UpdateExtensionStatus();
+        }
+    }
+
+    private void Link_RequestNavigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
+    {
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
+        e.Handled = true;
     }
 
     private void ExtensionFolder_Click(object sender, RoutedEventArgs e)

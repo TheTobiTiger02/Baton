@@ -10,6 +10,13 @@ let socket = null;
 let devices = [];
 let pendingSeeks = []; // { url, positionMs, expiresAt }
 let sendTimer = null;
+// The token Baton gave this browser when the user allowed it (store builds), or the one a
+// development build carries in config.js. Until Baton knows it, the popup says to allow it.
+let token = globalThis.BATON_TOKEN || null;
+let awaitingApproval = false;
+const tokenLoaded = chrome.storage.local.get("batonToken").then((stored) => {
+  if (stored && stored.batonToken) token = stored.batonToken;
+}).catch(() => {});
 
 async function browserName() {
   // Firefox-based browsers (Zen, LibreWolf...) name themselves; Chromium ones only through brands.
@@ -34,9 +41,10 @@ function connect() {
     return;
   }
   socket.onopen = async () => {
-    // Firefox extensions have a random origin, so they prove themselves with the token their
-    // build carries (config.js); Chromium ones are known by their fixed origin.
-    send({ type: "hello", browser: await browserName(), token: globalThis.BATON_TOKEN, version: chrome.runtime.getManifest().version });
+    // Anything but Baton's development build proves itself with its token; without one, Baton
+    // asks the user to allow this browser and then sends one.
+    await tokenLoaded;
+    send({ type: "hello", browser: await browserName(), token, version: chrome.runtime.getManifest().version });
     scheduleReport(0);
   };
   socket.onmessage = (event) => onHostMessage(JSON.parse(event.data));
@@ -150,7 +158,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
   // From the popup.
   if (message.type === "popup") {
-    activeTabId().then((tabId) => reply({ connected: !!(socket && socket.readyState === WebSocket.OPEN), devices, tab: tabId !== null ? tabs.get(tabId) : null, tabId }));
+    activeTabId().then((tabId) => reply({ connected: !!(socket && socket.readyState === WebSocket.OPEN), awaitingApproval, devices, tab: tabId !== null ? tabs.get(tabId) : null, tabId }));
     return true;
   }
   if (message.type === "sendTab") {
@@ -188,6 +196,16 @@ async function onHostMessage(message) {
   switch (message.type) {
     case "devices":
       devices = message.devices;
+      awaitingApproval = false;
+      break;
+    case "approval":
+      awaitingApproval = message.state === "waiting";
+      break;
+    case "token":
+      token = message.token;
+      awaitingApproval = false;
+      chrome.storage.local.set({ batonToken: token }).catch(() => {});
+      scheduleReport(0);
       break;
     case "ping":
       send({ type: "pong" });

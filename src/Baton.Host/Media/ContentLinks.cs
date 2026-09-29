@@ -56,6 +56,13 @@ public static partial class ContentLinks
     }
 
     /// <summary>Where to look for <paramref name="query"/> on a service when the exact item is unknown.</summary>
+    /// <summary>The Stremio page of a title (see <see cref="StremioResolver"/>): Stremio and Harbor both open it.</summary>
+    public static string StremioDetail(string id) => $"stremio:///detail/{id}";
+
+    /// <summary>A Twitch channel's page, when the name is one (letters, digits, underscore).</summary>
+    public static string? TwitchChannel(string? name) =>
+        name is { Length: >= 3 and <= 25 } && name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_') ? $"https://www.twitch.tv/{name}" : null;
+
     public static string? SearchUrl(string provider, string query)
     {
         var q = Uri.EscapeDataString(query);
@@ -67,6 +74,8 @@ public static partial class ContentLinks
             "netflix" => $"https://www.netflix.com/search?q={q}",
             "disney" => $"https://www.disneyplus.com/search?q={q}",
             "prime" => $"https://www.primevideo.com/search/ref=atv_nb_sug?phrase={q}",
+            "twitch" => $"https://www.twitch.tv/search?term={q}",
+            "stremio" => $"stremio:///search?search={q}",
             _ => null
         };
     }

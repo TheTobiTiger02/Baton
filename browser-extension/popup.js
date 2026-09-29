@@ -24,6 +24,14 @@ chrome.runtime.sendMessage({ type: "popup" }, (state) => {
     return;
   }
 
+  if (state.awaitingApproval) {
+    root.append(element("div", { className: "card" }, [
+      element("div", { className: "title", textContent: "Allow this browser in Baton" }),
+      element("div", { className: "muted", textContent: "Baton on this PC asks whether this browser may show its tabs. Choose Allow there (or in Settings → Browser)." })
+    ]));
+    return;
+  }
+
   const tab = state.tab;
   const media = tab && tab.media;
   const card = element("div", { className: "card" }, [

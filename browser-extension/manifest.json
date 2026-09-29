@@ -2,10 +2,10 @@
   "manifest_version": 3,
   "name": "Baton",
   "description": "Continue this tab's video or page on your phone, right to the second.",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwrRdj6xYK4i7ZTDAL6BLFuqYddkXB0/Q81EIvGLZrWmVxDaejygrPRkG51rlk46dprs4k1O+5GWNzuwdzxWjEOgZkc1iInzw1Qvo5At2JjgujSN4PylD/Mpa7cLGqJnzvhHw7mhwrhD4Dw0q9aWW97uV+X+Q4a9LgGYAd4wB425yjaxAgNrV56lYPCtVw/7wOz95qGbzGIRKYPgezAN8MYOesYFGnTNbSZ86RrjZA6qdil43nrKkTKFTTULKbLQa75VT+xIpPPsYli+LWc35dhU64Ow0MZR0+jj22+s3qM/LOt4UFM7VfHVEb6UR9pWyj7DlE/9wxWR+EqppxqFnawIDAQAB",
   "minimum_chrome_version": "116",
-  "permissions": ["tabs", "contextMenus", "alarms", "scripting"],
+  "permissions": ["tabs", "contextMenus", "alarms", "scripting", "storage"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" },
   "content_scripts": [

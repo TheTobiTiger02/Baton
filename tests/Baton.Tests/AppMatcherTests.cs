@@ -30,6 +30,37 @@ public class AppMatcherTests
         AppMatcher.Options(activity, from, to, apps, stream).ToArray();
 
     [Fact]
+    public void TwitchTabsOpenInTheTwitchAppAndStremioInStremio()
+    {
+        var twitch = new Activity("tab:1", "pc", ActivityKind.WebMedia, "Stream", new ActivityApp("Zen", "zen"), DateTimeOffset.UtcNow,
+            Url: "https://www.twitch.tv/somechannel", Content: new ActivityContent("twitch"));
+        CatalogApp[] phone = [.. Phone, new("tv.twitch.android.app", "Twitch"), new("com.stremio.one", "Stremio")];
+        Assert.Equal("Twitch", Options(twitch, Platforms.Windows, Platforms.Android, phone)[0].Label);
+
+        // Harbor on the PC is a Stremio client: it continues in Stremio, not as a window stream.
+        var harbor = new Activity("media:harbor", "pc", ActivityKind.AppMedia, "Lanterns", new ActivityApp("Harbor", "app.harbor"), DateTimeOffset.UtcNow,
+            Content: new ActivityContent("stremio", "series/tt1234567"), Playback: new Playback(60_000, 3_000_000, true, 1, DateTimeOffset.UtcNow),
+            Window: new ActivityWindow("1a", "harbor"));
+        var options = Options(harbor, Platforms.Windows, Platforms.Android, phone);
+        Assert.Equal((ChoiceKinds.Default, "Stremio"), (options[0].Kind, options[0].Label));
+        Assert.Contains(options, option => option.Kind == ChoiceKinds.Stream);
+        Assert.False(Baton.Host.Handoff.HandoffCoordinator.ContinuesAsStream(harbor));
+    }
+
+    [Fact]
+    public void StremioTitlesBecomeStremioPages()
+    {
+        Assert.Equal(("Lanterns", 1, 3), Baton.Host.Media.StremioResolver.ParseTitle("Lanterns - S01E03 - The Ring"));
+        Assert.Equal(("Lanterns", (int?)null, (int?)null), Baton.Host.Media.StremioResolver.ParseTitle("Lanterns"));
+        const string catalog = """{"metas":[{"id":"tt9999999","name":"Lanterns of Old","type":"series"},{"id":"tt1234567","name":"Lanterns","type":"series"}]}""";
+        Assert.Equal("tt1234567", Baton.Host.Media.StremioResolver.Match(catalog, "lanterns"));
+        Assert.Null(Baton.Host.Media.StremioResolver.Match(catalog, "Green Lantern"));
+        Assert.Equal("stremio:///detail/series/tt1234567/tt1234567:1:3", Baton.Host.Media.ContentLinks.StremioDetail("series/tt1234567/tt1234567:1:3"));
+        Assert.Equal("https://www.twitch.tv/some_channel", Baton.Host.Media.ContentLinks.TwitchChannel("some_channel"));
+        Assert.Null(Baton.Host.Media.ContentLinks.TwitchChannel("Just Chatting with friends"));
+    }
+
+    [Fact]
     public void KnownPairOpensTheDesktopAppFirstThenTheWebThenTheMirror()
     {
         var options = Options(PhoneApp("com.whatsapp", "WhatsApp"), Platforms.Android, Platforms.Windows, Pc);

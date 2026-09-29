@@ -161,6 +161,18 @@ public sealed class MediaOpener(
                     ? (content.Id, OpenResult.Opened())
                     : (ContentLinks.SearchUrl("spotify", query), OpenResult.Fallback("Opened a Spotify search for the track."));
 
+            case "stremio":
+                // Stremio (or Harbor) resumes from the progress it keeps with the account; Baton
+                // only says what to open, never which stream to play.
+                return content.Id is { } stremioId
+                    ? (ContentLinks.StremioDetail(stremioId), OpenResult.Fallback($"Opened {activity.Title} in Stremio: it continues where your account says you stopped."))
+                    : (ContentLinks.SearchUrl("stremio", activity.Title), OpenResult.Fallback($"Opened a Stremio search for {activity.Title}."));
+
+            case "twitch":
+                return ContentLinks.TwitchChannel(activity.Subtitle) is { } channel
+                    ? (channel, OpenResult.Opened())
+                    : (ContentLinks.SearchUrl("twitch", query), OpenResult.Fallback("Opened a Twitch search for the stream."));
+
             case "netflix" or "disney" or "prime":
             {
                 var name = KnownApps.FromProvider(content.Provider)!.DisplayName;

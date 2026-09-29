@@ -10,7 +10,7 @@ namespace Baton.Host.Handoff;
 /// extension). Done in the background as soon as an activity appears, so "Continue here" can open
 /// the video immediately.
 /// </summary>
-public sealed class ActivityEnricher(YouTubeResolver youtube, DiagnosticsLog diagnostics)
+public sealed class ActivityEnricher(YouTubeResolver youtube, DiagnosticsLog diagnostics, StremioResolver? stremio = null)
 {
     private readonly ConcurrentDictionary<string, string?> _resolved = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, byte> _inFlight = new(StringComparer.Ordinal);
@@ -31,6 +31,11 @@ public sealed class ActivityEnricher(YouTubeResolver youtube, DiagnosticsLog dia
 
     public Activity Enrich(Activity activity)
     {
+        if (stremio is not null && NeedsStremioId(activity))
+        {
+            return EnrichStremio(activity);
+        }
+
         if (!NeedsVideoId(activity))
         {
             return activity;
@@ -63,6 +68,47 @@ public sealed class ActivityEnricher(YouTubeResolver youtube, DiagnosticsLog dia
         && activity.Playback is { } playback
         && (content.Provider is "youtube" or "youtubemusic"
             || (content.Provider is "web" or "unknown" && playback.DurationMs > 0));
+
+    /// <summary>Something playing in Stremio or Harbor that isn't identified yet.</summary>
+    public static bool NeedsStremioId(Activity activity) =>
+        activity.Content is { Provider: "stremio", Id: null } && !string.IsNullOrWhiteSpace(activity.Title);
+
+    private Activity EnrichStremio(Activity activity)
+    {
+        var key = "stremio|" + activity.Title;
+        if (_resolved.TryGetValue(key, out var id))
+        {
+            return id is null ? activity : activity with { Content = activity.Content! with { Id = id } };
+        }
+
+        if (_inFlight.TryAdd(key, 0))
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    id = await stremio!.FindAsync(activity.Title, activity.Playback?.DurationMs ?? 0, CancellationToken.None);
+                    _resolved[key] = id;
+                    diagnostics.Record(DiagnosticsCategory.Handoff, "enrich.stremio", $"'{activity.Title}' -> {id ?? "no match"}");
+                    if (id is not null)
+                    {
+                        Changed?.Invoke();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _resolved[key] = null;
+                    diagnostics.Record(DiagnosticsCategory.Handoff, "enrich.failed", ex.Message, severity: DiagnosticsSeverity.Debug);
+                }
+                finally
+                {
+                    _inFlight.TryRemove(key, out _);
+                }
+            });
+        }
+
+        return activity;
+    }
 
     private static string Key(Activity activity) =>
         $"{activity.Title}|{activity.Subtitle}|{(activity.Playback?.DurationMs ?? 0) / 1000}";

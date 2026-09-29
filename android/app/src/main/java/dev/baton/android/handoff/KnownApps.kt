@@ -28,6 +28,8 @@ object KnownApps {
         KnownApp("youtube", "YouTube", "com.google.android.youtube",
             variants = listOf("app.revanced.android.youtube", "app.rvx.android.youtube", "anddea.youtube", "com.vanced.android.youtube")),
         KnownApp("vlc", "VLC", "org.videolan.vlc"),
+        KnownApp("twitch", "Twitch", "tv.twitch.android.app"),
+        KnownApp("stremio", "Stremio", "com.stremio.one"),
         KnownApp("chrome", "Chrome", "com.android.chrome", isBrowser = true),
         KnownApp("chrome", "Chrome Beta", "com.chrome.beta", isBrowser = true),
         KnownApp("samsung", "Samsung Internet", "com.sec.android.app.sbrowser", isBrowser = true),
@@ -96,6 +98,15 @@ object ContentLinks {
         return videoIdPath.find(uri.path ?: "")?.groupValues?.get(1)
     }
 
+    private val twitchVideo = Regex("""^https?://(?:www\.|m\.)?twitch\.tv/videos/(\d+)""", RegexOption.IGNORE_CASE)
+
+    /** A Twitch past broadcast at the second it was left: `?t=1h2m3s`. Live channels have no time. */
+    fun withTwitchTime(url: String, positionMs: Long): String {
+        val id = twitchVideo.find(url)?.groupValues?.get(1) ?: return url
+        val seconds = positionMs / 1000
+        return "https://www.twitch.tv/videos/$id?t=${seconds / 3600}h${seconds / 60 % 60}m${seconds % 60}s"
+    }
+
     fun withYouTubeTime(url: String, positionMs: Long): String {
         val id = youTubeVideoId(url) ?: return url
         return youTubeWatch(id, positionMs, url.contains("music.youtube.com", ignoreCase = true))
@@ -118,5 +129,30 @@ object ContentLinks {
     fun isHostOnly(url: String): Boolean {
         val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return false
         return uri.host != null && (uri.rawPath.isNullOrEmpty() || uri.rawPath == "/") && uri.rawQuery == null
+    }
+}
+
+/**
+ * Which app a link opens in: an installed app that says it handles it (Twitch, X, Reddit…), not
+ * the browser. Android gives unverified app links to the browser, so Baton picks the app itself.
+ */
+object LinkApps {
+    /** The app among [handlers] that isn't one of the [browsers] (or Baton), or null for the browser. */
+    fun choose(handlers: List<String>, browsers: Set<String>, self: String): String? =
+        handlers.firstOrNull { it !in browsers && it != self && KnownApps.fromPackage(it)?.isBrowser != true }
+
+    fun appFor(context: android.content.Context, url: String): String? {
+        val packages = context.packageManager
+        fun handlers(target: String) = runCatching {
+            packages.queryIntentActivities(
+                android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(target))
+                    .addCategory(android.content.Intent.CATEGORY_BROWSABLE),
+                android.content.pm.PackageManager.MATCH_ALL
+            ).map { it.activityInfo.packageName }.distinct()
+        }.getOrDefault(emptyList())
+        // What handles any web page is a browser; what handles only this site is its app. Only
+        // apps with a home screen icon: system services (Play services) also claim some links.
+        val browsers = handlers("https://example.com/").toSet()
+        return choose(handlers(url).filter { packages.getLaunchIntentForPackage(it) != null }, browsers, context.packageName)
     }
 }

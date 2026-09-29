@@ -124,7 +124,11 @@
                                         </StackPanel>
                                     </DockPanel>
 
-                                    <Button Content="Done" HorizontalAlignment="Left" MinWidth="100" Click="WelcomeDone_Click" />
+                                    <DockPanel>
+                                        <CheckBox x:Name="WelcomeShortcut" DockPanel.Dock="Right" Style="{StaticResource ToggleSwitch}" VerticalAlignment="Center"
+                                                  Content="Desktop shortcut" Click="Shortcut_Click" />
+                                        <Button Content="Done" HorizontalAlignment="Left" MinWidth="100" Click="WelcomeDone_Click" />
+                                    </DockPanel>
                                 </StackPanel>
                             </Border>
 
@@ -215,6 +219,14 @@
                                     <StackPanel>
                                         <TextBlock Text="Start Baton with Windows" Style="{StaticResource SettingsTitle}" />
                                         <TextBlock Text="Keeps your phones connected in the background, from the notification area." Style="{StaticResource SettingsDescription}" />
+                                    </StackPanel>
+                                </CheckBox>
+                            </Border>
+                            <Border Style="{StaticResource SettingsCard}">
+                                <CheckBox x:Name="ShortcutToggle" Style="{StaticResource ToggleSwitch}" Click="Shortcut_Click">
+                                    <StackPanel>
+                                        <TextBlock Text="Desktop shortcut" Style="{StaticResource SettingsTitle}" />
+                                        <TextBlock Text="Baton is always in the Start menu; this adds it to the desktop too." Style="{StaticResource SettingsDescription}" />
                                     </StackPanel>
                                 </CheckBox>
                             </Border>
@@ -326,10 +338,36 @@
                                         </StackPanel>
                                     </DockPanel>
                                     <TextBlock Style="{StaticResource SettingsDescription}" Margin="42,10,0,0">
-                                        Gives exact links and positions for videos and pages in Chrome, Edge and Opera. To add it: open
-                                        <Run FontWeight="SemiBold">edge://extensions</Run> or <Run FontWeight="SemiBold">chrome://extensions</Run>,
+                                        Gives exact links and positions for videos and pages.
+                                        <Run FontWeight="SemiBold">Zen and Firefox:</Run> open
+                                        <Hyperlink NavigateUri="https://github.com/TheTobiTiger02/Baton/releases/latest/download/baton-firefox.xpi" RequestNavigate="Link_RequestNavigate">baton-firefox.xpi</Hyperlink>
+                                        in the browser and add it.
+                                        <Run FontWeight="SemiBold">Chrome, Edge, Opera:</Run> open <Run FontWeight="SemiBold">chrome://extensions</Run>,
                                         turn on Developer mode, choose <Run FontWeight="SemiBold">Load unpacked</Run> and pick the extension folder.
+                                        The first time, Baton asks you to allow the browser.
                                     </TextBlock>
+                                    <ItemsControl x:Name="PendingBrowsers" Margin="42,10,0,0" Focusable="False">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <DockPanel Margin="0,4">
+                                                    <Button DockPanel.Dock="Right" Content="Allow" Style="{StaticResource AccentButton}" Tag="{Binding ConnectionId}" Click="AllowBrowser_Click" />
+                                                    <TextBlock VerticalAlignment="Center" TextWrapping="Wrap"><Run Text="{Binding Browser, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=" asks to connect" /></TextBlock>
+                                                </DockPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <ItemsControl x:Name="AllowedBrowsers" Margin="42,6,0,0" Focusable="False">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <DockPanel Margin="0,4">
+                                                    <Button DockPanel.Dock="Right" Content="Remove" Tag="{Binding Id}" Click="RemoveBrowser_Click" />
+                                                    <TextBlock VerticalAlignment="Center" Style="{StaticResource SettingsDescription}">
+                                                        <Run Text="{Binding Browser, Mode=OneWay}" /><Run Text=" allowed " /><Run Text="{Binding Since, Mode=OneWay}" />
+                                                    </TextBlock>
+                                                </DockPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
                                 </StackPanel>
                             </Border>
 

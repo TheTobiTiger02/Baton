@@ -211,3 +211,32 @@ public class WindowTests
         Assert.Equal([0, 0, 1, 0x65, 9, 9], frame);
     }
 }
+
+public class BrowserApprovalTests
+{
+    [Fact]
+    public void AnAllowedBrowserIsKnownByItsTokenUntilRemoved()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"baton-approvals-{Guid.NewGuid():n}.json");
+        try
+        {
+            var approvals = new Baton.Host.Browser.BrowserApprovals(path);
+            var token = approvals.Approve("Zen");
+            Assert.True(approvals.IsApproved(token));
+            Assert.False(approvals.IsApproved("not-the-token"));
+            Assert.False(approvals.IsApproved(null));
+
+            // Kept across restarts, and only as a hash.
+            var reloaded = new Baton.Host.Browser.BrowserApprovals(path);
+            Assert.True(reloaded.IsApproved(token));
+            Assert.DoesNotContain(token, File.ReadAllText(path));
+
+            reloaded.Revoke(Assert.Single(reloaded.Approved).Id);
+            Assert.False(reloaded.IsApproved(token));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+}

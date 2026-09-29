@@ -31,6 +31,24 @@ class ContentTest {
     }
 
     @Test
+    fun twitchPastBroadcastsKeepTheirSecond() {
+        assertEquals("https://www.twitch.tv/videos/2201234567?t=1h2m3s",
+            ContentLinks.withTwitchTime("https://www.twitch.tv/videos/2201234567?filter=archives", 3_723_900))
+        // A live channel has no time to give.
+        assertEquals("https://www.twitch.tv/somechannel", ContentLinks.withTwitchTime("https://www.twitch.tv/somechannel", 60_000))
+    }
+
+    @Test
+    fun linksOpenInTheSiteAppNotTheBrowser() {
+        val browsers = setOf("com.android.chrome", "com.sec.android.app.sbrowser")
+        assertEquals("tv.twitch.android.app",
+            LinkApps.choose(listOf("com.android.chrome", "tv.twitch.android.app"), browsers, "dev.baton.android"))
+        assertNull(LinkApps.choose(listOf("com.sec.android.app.sbrowser", "com.android.chrome"), browsers, "dev.baton.android"))
+        // A browser that only claims some sites is still a browser; Baton never picks itself.
+        assertNull(LinkApps.choose(listOf("org.mozilla.firefox", "dev.baton.android"), browsers, "dev.baton.android"))
+    }
+
+    @Test
     fun pairingLinkMatchesPcFormat() {
         // Exactly what the PC's PairingLink.ToString() writes.
         val raw = "baton://pair?h=a47f&n=DESKTOP%20PC&f=1acf&c=683947&e=192.168.178.125%3A7838"

@@ -27,6 +27,7 @@ public sealed class BatonRuntime : IAsyncDisposable
         Host.BrowserEndpoint = Browser.HandleAsync;
         Media.IsCoveredElsewhere = Browser.Covers;
         Browser.TokenPath = BrowserToken.EnsureFile(Host.StorageDirectory);
+        Browser.Approvals = new BrowserApprovals(Path.Combine(Host.StorageDirectory, "browser-approvals.json"));
         Apps = new Baton.Host.Apps.AppDirectory(Host.StorageDirectory, Host.Diagnostics) { ResumeExisting = ResumeExistingAsync };
         var mediaOpener = new MediaOpener(Media, youtube, Host.Diagnostics, Browser.ExpectSeek, ResumeExistingAsync);
         Coordinator = new HandoffCoordinator(
@@ -36,7 +37,7 @@ public sealed class BatonRuntime : IAsyncDisposable
                 new LocalMediaOpener(Host.Files, Media, Host.Diagnostics),
                 mediaOpener
             ],
-            new ActivityEnricher(youtube, Host.Diagnostics),
+            new ActivityEnricher(youtube, Host.Diagnostics, new StremioResolver(_http)),
             Apps)
         {
             OfferStream = (activity, target, sessionId) => activity.Window is { } window

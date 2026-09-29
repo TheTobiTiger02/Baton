@@ -40,6 +40,40 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
     /// random origin, so the origin alone can't tell Baton's from any other; the token can.
     /// </summary>
     public string? TokenPath { get; set; }
+
+    /// <summary>Browsers the user allowed; set by the runtime.</summary>
+    public BrowserApprovals? Approvals { get; set; }
+
+    /// <summary>An extension without a token asks to connect: (connection id, browser name). Any thread.</summary>
+    public event Action<string, string>? ApprovalRequested;
+
+    /// <summary>Browsers waiting for the user to allow them: (connection id, browser name).</summary>
+    public IReadOnlyList<(string ConnectionId, string Browser)> PendingApprovals =>
+        _connections.Values.Where(connection => connection.PendingHello is not null).Select(connection => (connection.Id, connection.Browser)).ToArray();
+
+    /// <summary>The user allowed a waiting browser: it gets its token and continues as if it had presented one.</summary>
+    public async Task ApproveAsync(string connectionId)
+    {
+        if (Approvals is null || !_connections.TryGetValue(connectionId, out var connection) || connection.PendingHello is not { } hello)
+        {
+            return;
+        }
+
+        var token = Approvals.Approve(connection.Browser);
+        connection.PendingHello = null;
+        connection.Proven = true;
+        diagnostics.Record(DiagnosticsCategory.Media, "browser.approved", connection.Browser);
+        await SendAsync(connection, new { type = "token", token });
+        await SendAsync(connection, new { type = "devices", devices = _devices });
+        OnMessage(connection, hello);
+        Changed?.Invoke();
+    }
+
+    /// <summary>A token from an earlier approval, or the one baked into a development build.</summary>
+    private bool IsKnownToken(string? token) =>
+        !string.IsNullOrEmpty(token)
+        && ((Approvals?.IsApproved(token) ?? false)
+            || (Token() is { } legacy && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(token), Encoding.UTF8.GetBytes(legacy))));
     private int _nextConnection;
 
     public event Action? Changed;
@@ -50,9 +84,12 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
     /// <summary>The context menu asked to send a bare link to a device.</summary>
     public event Action<Activity, string>? SendUrlRequested;
 
-    public bool IsConnected => !_connections.IsEmpty;
+    public bool IsConnected => ProvenConnections.Any();
 
-    public IReadOnlyList<string> ConnectedBrowsers => _connections.Values.Select(connection => connection.Browser).Distinct().ToArray();
+    public IReadOnlyList<string> ConnectedBrowsers => ProvenConnections.Select(connection => connection.Browser).Distinct().ToArray();
+
+    /// <summary>Connections that may see devices and receive requests: allowed browsers only.</summary>
+    private IEnumerable<Connection> ProvenConnections => _connections.Values.Where(connection => connection.Proven);
 
     public IReadOnlyList<Activity> Current =>
         _connections.Values.SelectMany(connection => connection.Tabs.Select(tab => ToActivity(connection, tab))).ToArray();
@@ -68,10 +105,15 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
 
     public async Task HandleAsync(HttpContext context)
     {
+        // Only extensions: web pages can't claim an extension origin. Baton's own development
+        // build (fixed id) is trusted at once; any other extension (the store builds, Firefox's
+        // random origins) proves itself with a token, or asks the user once for one.
         var origin = context.Request.Headers.Origin.ToString();
-        var firefox = origin.StartsWith("moz-extension://", StringComparison.OrdinalIgnoreCase) && Token() is not null;
-        if (!context.WebSockets.IsWebSocketRequest
-            || (!string.Equals(origin, Origin, StringComparison.OrdinalIgnoreCase) && !firefox))
+        var trusted = string.Equals(origin, Origin, StringComparison.OrdinalIgnoreCase);
+        var extension = trusted
+            || origin.StartsWith("moz-extension://", StringComparison.OrdinalIgnoreCase)
+            || origin.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase);
+        if (!context.WebSockets.IsWebSocketRequest || !extension)
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             return;
@@ -80,7 +122,7 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
         using var socket = await context.WebSockets.AcceptWebSocketAsync();
         var connection = new Connection($"b{Interlocked.Increment(ref _nextConnection)}", socket)
         {
-            Proven = !firefox,
+            Proven = trusted,
             Process = LoopbackOwner.ProcessName(
                 new System.Net.IPEndPoint(context.Connection.RemoteIpAddress ?? System.Net.IPAddress.Loopback, context.Connection.RemotePort),
                 context.Connection.LocalPort)
@@ -88,7 +130,11 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
         _connections[connection.Id] = connection;
         using var pinger = new PeriodicTimer(TimeSpan.FromSeconds(20));
         _ = PingAsync(connection, pinger, context.RequestAborted);
-        await SendAsync(connection, new { type = "devices", devices = _devices });
+        if (connection.Proven)
+        {
+            await SendAsync(connection, new { type = "devices", devices = _devices });
+        }
+
         try
         {
             while (socket.State == WebSocketState.Open)
@@ -104,16 +150,30 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
                     var message = JsonDocument.Parse(text).RootElement;
                     if (!connection.Proven)
                     {
-                        // The first message must be a hello with the right token, or the socket closes.
-                        if (message.GetProperty("type").GetString() != "hello"
-                            || !message.TryGetProperty("token", out var token)
-                            || !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(token.GetString() ?? ""), Encoding.UTF8.GetBytes(Token() ?? "\0")))
+                        // Until proven, only a hello counts: with a token Baton gave out, or it waits for the user.
+                        if (message.GetProperty("type").GetString() != "hello")
                         {
-                            diagnostics.Record(DiagnosticsCategory.Media, "browser.rejected", "A Firefox extension without Baton's token", severity: DiagnosticsSeverity.Warning);
-                            break;
+                            continue;
+                        }
+
+                        var token = message.TryGetProperty("token", out var presented) ? presented.GetString() : null;
+                        if (!IsKnownToken(token))
+                        {
+                            NameFromHello(connection, message);
+                            var first = connection.PendingHello is null;
+                            connection.PendingHello = message.Clone();
+                            if (first)
+                            {
+                                diagnostics.Record(DiagnosticsCategory.Media, "browser.approval", $"{connection.Browser} asks to connect");
+                                ApprovalRequested?.Invoke(connection.Id, connection.Browser);
+                            }
+
+                            await SendAsync(connection, new { type = "approval", state = "waiting" });
+                            continue;
                         }
 
                         connection.Proven = true;
+                        await SendAsync(connection, new { type = "devices", devices = _devices });
                     }
 
                     OnMessage(connection, message);
@@ -139,7 +199,7 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
     public void PublishDevices(IReadOnlyList<BridgeDevice> devices)
     {
         _devices = devices;
-        foreach (var connection in _connections.Values)
+        foreach (var connection in ProvenConnections)
         {
             _ = SendAsync(connection, new { type = "devices", devices });
         }
@@ -151,7 +211,7 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
     /// </summary>
     public void ExpectSeek(string url, long positionMs)
     {
-        foreach (var connection in _connections.Values)
+        foreach (var connection in ProvenConnections)
         {
             _ = SendAsync(connection, new { type = "expect", url, positionMs });
         }
@@ -232,6 +292,12 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
         .Split('&', StringSplitOptions.RemoveEmptyEntries)
         .Where(pair => pair.Split('=')[0] is not ("t" or "start" or "time_continue" or "si" or "feature" or "pp") && !pair.StartsWith("utm_", StringComparison.Ordinal))
         .Order(StringComparer.Ordinal));
+
+    /// <summary>Every Firefox-based browser says "Firefox"; its process says which one it is (Zen...).</summary>
+    private static void NameFromHello(Connection connection, JsonElement hello) =>
+        connection.Browser = hello.TryGetProperty("browser", out var browser) && browser.GetString() is { } named && named != "Firefox"
+            ? named
+            : connection.Process is { } process ? KnownApps.DisplayName(process) : "Firefox";
 
     private static string ProcessOf(Connection connection) => connection.Process ?? connection.Browser.ToLowerInvariant() switch
     {
@@ -326,10 +392,7 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
         switch (message.GetProperty("type").GetString())
         {
             case "hello":
-                // Every Firefox-based browser says "Firefox"; its process says which one it is (Zen...).
-                connection.Browser = message.GetProperty("browser").GetString() is { } named && named != "Firefox"
-                    ? named
-                    : connection.Process is { } process ? KnownApps.DisplayName(process) : "Firefox";
+                NameFromHello(connection, message);
                 connection.ConfirmsResume = message.TryGetProperty("version", out var version)
                     && Version.TryParse(version.GetString(), out var parsed) && parsed >= new Version(0, 1, 2);
                 diagnostics.Record(DiagnosticsCategory.Media, "browser.connected", connection.Browser);
@@ -529,8 +592,11 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
         /// <summary>The browser's process name (zen, msedge...), when it could be found.</summary>
         public string? Process { get; init; }
 
-        /// <summary>False for a Firefox extension until its hello carried the token.</summary>
+        /// <summary>False until the hello carried a token Baton gave out (or the development id connected).</summary>
         public bool Proven { get; set; } = true;
+
+        /// <summary>The hello of an extension waiting for the user's approval; handled once allowed.</summary>
+        public JsonElement? PendingHello { get; set; }
 
         /// <summary>The extension answers a resume with whether the seek applied (0.1.2 and later).</summary>
         public bool ConfirmsResume { get; set; }

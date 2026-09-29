@@ -95,6 +95,8 @@ public static partial class AppMatcher
         { Kind: ActivityKind.LocalMedia } => targetPlatform == Platforms.Android ? "Baton player" : "Default player",
         { Kind: ActivityKind.WebPage } => "Default browser",
         _ when KnownApps.FromProvider(activity.Content?.Provider) is { } app => app.DisplayName,
+        // A link: the phone opens it in the site's app when one handles it, else the browser.
+        { Url: not null } => targetPlatform == Platforms.Android ? "App or browser" : "Default browser",
         { Content.Provider: "web" } => "YouTube or the browser",
         _ => "Usual app"
     };

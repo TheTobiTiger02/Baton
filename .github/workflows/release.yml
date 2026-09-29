@@ -9,6 +9,7 @@
 #   ANDROID_KEYSTORE_PASSWORD its password
 #   ANDROID_KEY_ALIAS         the key's alias
 #   ANDROID_KEY_PASSWORD      the key's password
+#   AMO_JWT_ISSUER / AMO_JWT_SECRET  addons.mozilla.org API key, to sign the Firefox add-on (optional)
 name: Release
 
 on:
@@ -82,6 +83,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
         run: ./scripts/Release.ps1 -Version ${{ steps.version.outputs.value }}
 
       - name: Remove the signing key

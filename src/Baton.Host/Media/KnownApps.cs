@@ -32,6 +32,10 @@ public static class KnownApps
         new("youtube", "YouTube", ["youtube"], "com.google.android.youtube", WebUrl: "https://www.youtube.com",
             AndroidVariants: ["app.revanced.android.youtube", "app.rvx.android.youtube", "anddea.youtube", "com.vanced.android.youtube"]),
         new("vlc", "VLC", ["vlc"], "org.videolan.vlc"),
+        new("twitch", "Twitch", ["twitch"], "tv.twitch.android.app", WebUrl: "https://www.twitch.tv"),
+        // Harbor is a Stremio client: both open stremio:// links, and both resume from the account.
+        new("stremio", "Stremio", ["stremio"], "com.stremio.one", UriScheme: "stremio"),
+        new("stremio", "Harbor", ["harbor"], "com.stremio.one", UriScheme: "stremio"),
         new("chrome", "Chrome", ["chrome"], "com.android.chrome", IsBrowser: true),
         new("edge", "Edge", ["msedge", "microsoft.microsoftedge"], "com.microsoft.emmx", IsBrowser: true),
         new("opera", "Opera", ["opera"], "com.opera.browser", IsBrowser: true),
