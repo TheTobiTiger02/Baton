@@ -2,6 +2,7 @@ package dev.baton.android.ui
 
 import dev.baton.android.apps.Choices
 import dev.baton.android.apps.AppCatalog
+import dev.baton.android.apps.AppUpdates
 import androidx.compose.material.icons.rounded.Apps
 import android.Manifest
 import android.content.Context
@@ -179,35 +180,39 @@ fun BatonApp(trust: TrustStore) {
 
 // ---- Updates ----
 
+/** What the update button says for each stage, and the line under the version. */
+private fun updateTexts(state: AppUpdates.State): Pair<String, String> = when (state) {
+    AppUpdates.State.Idle -> "Check for updates" to
+        if (dev.baton.android.BuildConfig.DEBUG) "Development build: it doesn't update from releases." else "Updates come from Baton's GitHub releases."
+    AppUpdates.State.Checking -> "Checking…" to "Looking for a newer version…"
+    AppUpdates.State.UpToDate -> "Check for updates" to "Baton is up to date."
+    is AppUpdates.State.Available -> "Update to ${state.release.version}" to "Version ${state.release.version} is available."
+    is AppUpdates.State.Downloading -> "Downloading ${state.percent}%" to "Downloading version ${state.release.version}…"
+    is AppUpdates.State.Ready -> "Install ${state.release.version}" to "Version ${state.release.version} is ready to install."
+    is AppUpdates.State.Failed -> "Try again" to state.message
+}
+
 /** The installed version, and a newer release to install when there is one. */
 @Composable
 private fun UpdateCard() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val available by dev.baton.android.apps.AppUpdates.available.collectAsState()
-    var status by remember { mutableStateOf<String?>(null) }
+    val state by AppUpdates.state.collectAsState()
+    val (label, line) = updateTexts(state)
     Card(shape = RoundedCornerShape(Tokens.CardRadius),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(Tokens.Space4)) {
-            Text("Baton ${dev.baton.android.apps.AppUpdates.currentVersion}", style = MaterialTheme.typography.titleMedium)
-            Text(status ?: available?.let { "Version ${it.version} is available." } ?: "Updates come from Baton's GitHub releases.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Baton ${AppUpdates.currentVersion}", style = MaterialTheme.typography.titleMedium)
+            Text(line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            (state as? AppUpdates.State.Downloading)?.let { downloading ->
+                Spacer(Modifier.height(Tokens.Space2))
+                androidx.compose.material3.LinearProgressIndicator(progress = { downloading.percent / 100f }, modifier = Modifier.fillMaxWidth())
+            }
             Spacer(Modifier.height(Tokens.Space3))
-            OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = {
-                scope.launch {
-                    val release = available ?: run {
-                        status = "Checking…"
-                        dev.baton.android.apps.AppUpdates.check()
-                    }
-                    status = when {
-                        release == null -> "Baton is up to date."
-                        available == null -> null
-                        else -> if (dev.baton.android.apps.AppUpdates.install(context, release)) "Downloading done. Confirm the install."
-                            else "The update couldn't be downloaded. Try again later."
-                    }
-                }
-            }) { Text(if (available != null) "Update to ${available!!.version}" else "Check for updates") }
+            OutlinedButton(modifier = Modifier.fillMaxWidth(), enabled = state != AppUpdates.State.Checking, onClick = {
+                if (AppUpdates.release != null) AppUpdates.update(context) else scope.launch { AppUpdates.check(context) }
+            }) { Text(label) }
         }
     }
 }
@@ -471,7 +476,7 @@ private fun HomeScreen(grants: Grants, onSettings: (() -> Unit)?) {
     var notice by remember { mutableStateOf<HandoffNotice?>(null) }
     var pickApp by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
-    val updateAvailable by dev.baton.android.apps.AppUpdates.available.collectAsState()
+    val updateState by AppUpdates.state.collectAsState()
     val scope = rememberCoroutineScope()
     val preferences by Choices.preferences.collectAsState()
     val context = LocalContext.current
@@ -483,7 +488,7 @@ private fun HomeScreen(grants: Grants, onSettings: (() -> Unit)?) {
     }
 
     LaunchedEffect(Unit) {
-        launch { dev.baton.android.apps.AppUpdates.check() }
+        launch { AppUpdates.check(context) }
         HandoffEngine.refresh()
         Link.notices.collect { incoming ->
             notice = incoming.copy(title = incoming.title.ifBlank { notice?.title.orEmpty() })
@@ -511,14 +516,15 @@ private fun HomeScreen(grants: Grants, onSettings: (() -> Unit)?) {
                     StatusPill(status, pc?.name)
                 }
 
-                updateAvailable?.let { release ->
+                if (AppUpdates.release != null) {
                     item {
+                        val (label, line) = updateTexts(updateState)
                         Card(shape = RoundedCornerShape(Tokens.CardRadius),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
                             modifier = Modifier.fillMaxWidth().padding(top = Tokens.Space3)) {
                             Row(Modifier.padding(start = Tokens.Space4, end = Tokens.Space2), verticalAlignment = Alignment.CenterVertically) {
-                                Text("Baton ${release.version} is available", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                                TextButton(onClick = { scope.launch { dev.baton.android.apps.AppUpdates.install(context, release) } }) { Text("Update") }
+                                Text(line, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                TextButton(onClick = { AppUpdates.update(context) }) { Text(label) }
                             }
                         }
                     }
