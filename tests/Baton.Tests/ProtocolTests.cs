@@ -240,3 +240,20 @@ public class BrowserApprovalTests
         }
     }
 }
+
+public class TextAnchorTests
+{
+    [Fact]
+    public void PagesOpenScrolledToTheirTextAndFeedVideosAsTheirPost()
+    {
+        Assert.Equal("https://example.com/a#:~:text=The%20quick%20brown%2C%20fox%2Djumps%20%26%20more",
+            Baton.Host.Media.ContentLinks.WithTextAnchor("https://example.com/a", "The quick brown, fox-jumps & more"));
+        Assert.Equal("https://example.com/a#intro:~:text=Hello%20there",
+            Baton.Host.Media.ContentLinks.WithTextAnchor("https://example.com/a#intro", " Hello there "));
+        Assert.Equal("https://example.com/a", Baton.Host.Media.ContentLinks.WithTextAnchor("https://example.com/a", null));
+        Assert.Equal("https://example.com/a#:~:text=x", Baton.Host.Media.ContentLinks.WithTextAnchor("https://example.com/a#:~:text=x", "Other words"));
+
+        // The bridge sends a feed video as its post.
+        Assert.Equal(("web", (string?)null), Baton.Host.Browser.BrowserBridge.ClassifyUrl("https://x.com/someone/status/1234567890/video/1"));
+    }
+}

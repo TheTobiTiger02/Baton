@@ -107,6 +107,18 @@ object ContentLinks {
         return "https://www.twitch.tv/videos/$id?t=${seconds / 3600}h${seconds / 60 % 60}m${seconds % 60}s"
     }
 
+    /**
+     * The page scrolled to the text a browser should show at the top: a text fragment
+     * (`#:~:text=`), which Chrome, Samsung Internet, Edge and Firefox 131+ scroll to by
+     * themselves. The page's own `#fragment` stays in front. The PC's twin is ContentLinks.WithTextAnchor.
+     */
+    fun withTextAnchor(url: String, anchor: String?): String {
+        if (anchor.isNullOrBlank() || ":~:" in url) return url
+        val text = java.net.URLEncoder.encode(anchor.trim(), "UTF-8").replace("+", "%20")
+            .replace("-", "%2D").replace(",", "%2C").replace("&", "%26")
+        return if ('#' in url) "$url:~:text=$text" else "$url#:~:text=$text"
+    }
+
     fun withYouTubeTime(url: String, positionMs: Long): String {
         val id = youTubeVideoId(url) ?: return url
         return youTubeWatch(id, positionMs, url.contains("music.youtube.com", ignoreCase = true))
@@ -140,6 +152,15 @@ object LinkApps {
     /** The app among [handlers] that isn't one of the [browsers] (or Baton), or null for the browser. */
     fun choose(handlers: List<String>, browsers: Set<String>, self: String): String? =
         handlers.firstOrNull { it !in browsers && it != self && KnownApps.fromPackage(it)?.isBrowser != true }
+
+    /** Whether [packageName] opens any web page, i.e. is a browser. */
+    fun isBrowser(context: android.content.Context, packageName: String): Boolean = runCatching {
+        context.packageManager.queryIntentActivities(
+            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://example.com/"))
+                .addCategory(android.content.Intent.CATEGORY_BROWSABLE).setPackage(packageName),
+            android.content.pm.PackageManager.MATCH_ALL
+        ).isNotEmpty()
+    }.getOrDefault(false)
 
     fun appFor(context: android.content.Context, url: String): String? {
         val packages = context.packageManager

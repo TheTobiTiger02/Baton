@@ -269,7 +269,7 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
                 return 3;
             }
 
-            if (activity.Url is not null && SamePage(activity.Url, tab.Url))
+            if (activity.Url is not null && (SamePage(activity.Url, tab.Url) || tab.Media?.Url is { } post && SamePage(activity.Url, post)))
             {
                 return 2;
             }
@@ -450,8 +450,10 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
     {
         var media = tab.Media;
         var updatedAt = DateTimeOffset.FromUnixTimeMilliseconds(tab.UpdatedAt);
-        var (provider, contentId) = ClassifyUrl(tab.Url);
-        string? host = Uri.TryCreate(tab.Url, UriKind.Absolute, out var uri) ? uri.Host.Replace("www.", string.Empty) : null;
+        // A video in a feed continues as its post (or video), not as the feed's first page.
+        var url = media?.Url is { Length: > 0 } post ? post : tab.Url;
+        var (provider, contentId) = ClassifyUrl(url);
+        string? host = Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Host.Replace("www.", string.Empty) : null;
         return new Activity(
             $"tab:{connection.Id}:{tab.TabId}",
             string.Empty,
@@ -464,8 +466,9 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
                 : updatedAt,
             Subtitle: media?.Artist ?? host,
             ArtworkJpegBase64: media?.Artwork is { } art && _artwork.TryGetValue(art, out var jpeg) ? jpeg : null,
-            Url: tab.Url,
+            Url: url,
             Content: new ActivityContent(provider, contentId, media?.Title ?? tab.Title),
+            TextAnchor: media is null ? tab.Anchor : null,
             Playback: media is null ? null : new Playback(media.PositionMs, media.DurationMs, media.Playing, media.Rate <= 0 ? 1 : media.Rate, updatedAt),
             Volume: media?.Volume,
             // A player muted in the page is silent even when the tab isn't.
@@ -603,9 +606,11 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
     }
 
     public sealed record TabState(int TabId, bool Active, string Url, string? Title, MediaState? Media, long UpdatedAt, bool? Audible = null,
-        long? PlayingSince = null);
+        long? PlayingSince = null, string? Anchor = null);
 
-    public sealed record MediaState(string? Title, string? Artist, string? Artwork, long PositionMs, long DurationMs, bool Playing, double Rate, bool Live, double? Volume = null);
+    /// <param name="Url">The post a feed video belongs to (X, Reddit...), when the page isn't it.</param>
+    public sealed record MediaState(string? Title, string? Artist, string? Artwork, long PositionMs, long DurationMs, bool Playing, double Rate, bool Live, double? Volume = null,
+        string? Url = null);
 }
 
-public sealed record BridgeDevice(string DeviceId, string Name, bool Online);
+public sealed record BridgeDevice(string DeviceId, string Name, bool Online, bool IsDefault = false);

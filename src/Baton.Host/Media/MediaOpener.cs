@@ -108,7 +108,10 @@ public sealed class MediaOpener(
     {
         if (activity.Url is { } url)
         {
-            return (ContentLinks.YouTubeVideoId(url) is not null ? ContentLinks.WithYouTubeTime(url, positionMs) : url, OpenResult.Opened());
+            // A page opens scrolled to where it was read (the anchor); a video at its second.
+            return (ContentLinks.YouTubeVideoId(url) is not null
+                ? ContentLinks.WithYouTubeTime(url, positionMs)
+                : ContentLinks.WithTextAnchor(url, activity.TextAnchor), OpenResult.Opened());
         }
 
         var content = activity.Content;

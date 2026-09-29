@@ -274,7 +274,9 @@ data class Activity(
     /** Plays with sound right now; a muted autoplay video does not. Null when unknown. */
     val audible: Boolean? = null,
     /** In the window (or browser tab) the user last had in front. Null when unknown. */
-    val focused: Boolean? = null
+    val focused: Boolean? = null,
+    /** The first words at the top of a page's view: a browser opening it scrolls there. */
+    val textAnchor: String? = null
 )
 
 @Serializable

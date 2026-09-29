@@ -341,10 +341,14 @@ object HandoffEngine {
      */
     private suspend fun withFullUrl(context: Context, activity: Activity): Activity {
         val url = activity.url ?: return activity
-        if (!ContentLinks.isHostOnly(url)) return activity
-        val full = BatonAccessibilityService.revealUrl(context, activity.app.id) ?: return activity
+        // Where the page is scrolled to, while it is still in front and untouched.
+        val anchored = if (activity.kind == ActivityKind.WebPage) {
+            BatonAccessibilityService.readAnchor(activity.app.id)?.let { activity.copy(textAnchor = it) } ?: activity
+        } else activity
+        if (!ContentLinks.isHostOnly(url)) return anchored
+        val full = BatonAccessibilityService.revealUrl(context, activity.app.id) ?: return anchored
         Log.i(TAG, "Read the full address of ${activity.app.id}: $full")
-        return activity.copy(url = full)
+        return anchored.copy(url = full)
     }
 
     private fun take(activity: Activity): Activity {

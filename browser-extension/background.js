@@ -95,8 +95,25 @@ async function askTab(tabId, message) {
 chrome.runtime.onInstalled.addListener(() => {
   connect();
   injectIntoOpenTabs();
-  chrome.contextMenus.create({ id: "baton-send-link", title: "Continue on phone", contexts: ["link", "page"] });
+  buildMenu();
 });
+
+/**
+ * One right-click entry per phone online, the default phone (Baton's shortcut target) first;
+ * browsers group them under "Baton" by themselves. Rebuilt whenever the phones change.
+ */
+function buildMenu() {
+  chrome.contextMenus.removeAll(() => {
+    const online = devices.filter((d) => d.online).sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0));
+    if (online.length === 0) {
+      chrome.contextMenus.create({ id: "baton-none", title: "Continue on phone (none connected)", contexts: ["link", "page"], enabled: false });
+      return;
+    }
+    for (const device of online) {
+      chrome.contextMenus.create({ id: `baton-send:${device.deviceId}`, title: `Continue on ${device.name}`, contexts: ["link", "page"] });
+    }
+  });
+}
 connect();
 
 async function activeTabId() {
@@ -119,7 +136,7 @@ async function report() {
     const isActive = tabId === activeId;
     const mediaRelevant = entry.media && (entry.media.playing || Date.now() - entry.updatedAt < 30 * 60_000);
     if (!mediaRelevant && !isActive) continue;
-    list.push({ tabId, active: isActive, audible: audible.get(tabId) ?? null, url: entry.url, title: entry.pageTitle, media: mediaRelevant ? entry.media : null, updatedAt: entry.updatedAt, playingSince: entry.playingSince || null });
+    list.push({ tabId, active: isActive, audible: audible.get(tabId) ?? null, url: entry.url, title: entry.pageTitle, media: mediaRelevant ? entry.media : null, anchor: entry.anchor || null, updatedAt: entry.updatedAt, playingSince: entry.playingSince || null });
   }
   if (activeId !== null && !tabs.has(activeId)) {
     const tab = await chrome.tabs.get(activeId).catch(() => null);
@@ -147,7 +164,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     const playing = current.media && current.media.playing;
     const playingSince = playing ? (previous && previous.playingSince && previous.media && previous.media.playing ? previous.playingSince : Date.now()) : null;
     tabs.set(sender.tab.id, { ...current, frameId, playingSince, updatedAt: Date.now() });
-    if (!previous || JSON.stringify(previous.media && { ...previous.media, positionMs: 0 }) !== JSON.stringify(current.media && { ...current.media, positionMs: 0 }) || previous.url !== current.url) {
+    if (!previous || JSON.stringify(previous.media && { ...previous.media, positionMs: 0 }) !== JSON.stringify(current.media && { ...current.media, positionMs: 0 }) || previous.url !== current.url || previous.anchor !== current.anchor) {
       scheduleReport();
     }
     return;
@@ -183,12 +200,13 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  const target = devices.find((d) => d.online);
-  if (!target || !tab) return;
+  const id = String(info.menuItemId);
+  if (!id.startsWith("baton-send:") || !tab) return;
+  const targetDeviceId = id.slice("baton-send:".length);
   if (info.linkUrl) {
-    send({ type: "sendUrl", url: info.linkUrl, title: info.linkUrl, targetDeviceId: target.deviceId });
+    send({ type: "sendUrl", url: info.linkUrl, title: info.linkUrl, targetDeviceId });
   } else {
-    send({ type: "send", tabId: tab.id, targetDeviceId: target.deviceId });
+    send({ type: "send", tabId: tab.id, targetDeviceId });
   }
 });
 
@@ -197,6 +215,7 @@ async function onHostMessage(message) {
     case "devices":
       devices = message.devices;
       awaitingApproval = false;
+      buildMenu();
       break;
     case "approval":
       awaitingApproval = message.state === "waiting";
@@ -223,7 +242,7 @@ async function onHostMessage(message) {
         // wouldn't, and Baton would go on showing this tab as playing.
         scheduleReport(0);
       }
-      const tabState = snapshot && { tabId: message.tabId, active: true, url: snapshot.url, title: snapshot.pageTitle, media: snapshot.media, updatedAt: Date.now() };
+      const tabState = snapshot && { tabId: message.tabId, active: true, url: snapshot.url, title: snapshot.pageTitle, media: snapshot.media, anchor: snapshot.anchor || null, updatedAt: Date.now() };
       send({ type: "taken", requestId: message.requestId, tabId: message.tabId, tab: tabState });
       break;
     }

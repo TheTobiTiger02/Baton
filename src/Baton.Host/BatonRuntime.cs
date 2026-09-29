@@ -57,9 +57,19 @@ public sealed class BatonRuntime : IAsyncDisposable
         };
         Browser.SendRequested += (activityId, target) => _ = Coordinator.SendAsync(target, activityId);
         Browser.SendUrlRequested += (activity, target) => _ = Coordinator.SendActivityAsync(target, activity);
-        Coordinator.DevicesChanged += () => Browser.PublishDevices(Coordinator.GetDevices()
+        Coordinator.DevicesChanged += PublishDevicesToBrowsers;
+    }
+
+    /// <summary>The phone sends go to first (the app's default), for the browsers' menus.</summary>
+    public Func<string?>? DefaultPhone { get; set; }
+
+    /// <summary>Tells the browser extensions which phones there are, the default one marked.</summary>
+    public void PublishDevicesToBrowsers()
+    {
+        var preferred = DefaultPhone?.Invoke();
+        Browser.PublishDevices(Coordinator.GetDevices()
             .Where(device => device.Kind == DeviceKinds.Phone)
-            .Select(device => new BridgeDevice(device.DeviceId, device.Name, device.Online))
+            .Select(device => new BridgeDevice(device.DeviceId, device.Name, device.Online, device.DeviceId == preferred))
             .ToArray());
     }
 

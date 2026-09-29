@@ -56,6 +56,23 @@ public static partial class ContentLinks
     }
 
     /// <summary>Where to look for <paramref name="query"/> on a service when the exact item is unknown.</summary>
+    /// <summary>
+    /// The page scrolled to the text a browser should show at the top: a text fragment
+    /// (<c>#:~:text=</c>), which Chrome, Edge, Samsung Internet and Firefox 131+ scroll to by
+    /// themselves. The page's own <c>#fragment</c> stays in front.
+    /// </summary>
+    public static string WithTextAnchor(string url, string? anchor)
+    {
+        if (string.IsNullOrWhiteSpace(anchor) || url.Contains(":~:", StringComparison.Ordinal))
+        {
+            return url;
+        }
+
+        // The directive's own separators must be escaped inside the text.
+        var text = Uri.EscapeDataString(anchor.Trim()).Replace("-", "%2D").Replace(",", "%2C").Replace("&", "%26");
+        return url.Contains('#') ? $"{url}:~:text={text}" : $"{url}#:~:text={text}";
+    }
+
     /// <summary>The Stremio page of a title (see <see cref="StremioResolver"/>): Stremio and Harbor both open it.</summary>
     public static string StremioDetail(string id) => $"stremio:///detail/{id}";
 

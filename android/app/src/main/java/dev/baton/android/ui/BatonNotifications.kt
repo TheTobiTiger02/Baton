@@ -28,7 +28,8 @@ object BatonNotifications {
 
     /**
      * One line and at most one button, for what the user most likely wants next: send what this
-     * phone plays to the PC, else continue what the PC has, else send what this phone shows.
+     * phone plays (or the page being read) to the PC, else continue what the PC has, else send
+     * what this phone shows.
      */
     fun link(context: Context): Notification {
         ensureChannels(context)
@@ -36,7 +37,12 @@ object BatonNotifications {
         val pc = Link.peers.value.firstOrNull { it.kind == "pc" }
         val pcName = pc?.name ?: "PC"
         val pcActivity = pc?.activities?.firstOrNull()
-        val local = HandoffEngine.local.value.firstOrNull()
+        // What this phone would send: what plays here, else the page open in the browser (pages are
+        // only listed while their browser is in front), else the first thing listed.
+        val locals = HandoffEngine.local.value
+        val sendable = locals.firstOrNull { it.playback?.playing == true }
+            ?: locals.firstOrNull { it.kind == dev.baton.android.protocol.ActivityKind.WebPage }
+        val local = sendable ?: locals.firstOrNull()
         val ready = status.phase == LinkPhase.Ready
 
         val builder = Notification.Builder(context, CHANNEL_LINK)
@@ -55,8 +61,10 @@ object BatonNotifications {
 
         when {
             !ready -> builder.setContentTitle(status.detail.ifBlank { "Not connected" })
-            local != null && (local.playback?.playing == true || pcActivity == null) ->
-                offer("Send to $pcName: ${local.title}", 2, "Send to $pcName", HandoffActionReceiver.send(context))
+            // What plays here, or the page open in the browser right now (pages are only listed
+            // while their browser is in front): that is what the user would send.
+            local != null && (sendable != null || pcActivity == null) ->
+                offer("Send to $pcName: ${local.title}", 2, "Send to $pcName", HandoffActionReceiver.send(context, local.id))
             pcActivity != null && pc != null ->
                 offer("Continue here: ${pcActivity.title}", 1, "Continue here", HandoffActionReceiver.pull(context, pc))
             else -> builder.setContentTitle("Connected to $pcName")
@@ -158,7 +166,7 @@ object BatonNotifications {
 class HandoffActionReceiver : android.content.BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
-            ACTION_SEND -> HandoffEngine.sendTo()
+            ACTION_SEND -> HandoffEngine.sendTo(activityId = intent.getStringExtra(EXTRA_ACTIVITY))
             ACTION_PULL -> {
                 context.getSystemService(NotificationManager::class.java).cancel(BatonNotifications.PROMPT_ID)
                 BatonNotifications.cancelSuggestion(context)
@@ -178,7 +186,9 @@ class HandoffActionReceiver : android.content.BroadcastReceiver() {
         private const val EXTRA_ACTIVITY = "activity"
         private const val EXTRA_TITLE = "title"
 
-        fun send(context: Context) = Intent(context, HandoffActionReceiver::class.java).setAction(ACTION_SEND)
+        fun send(context: Context, activityId: String? = null) = Intent(context, HandoffActionReceiver::class.java)
+            .setAction(ACTION_SEND)
+            .putExtra(EXTRA_ACTIVITY, activityId)
 
         fun pull(context: Context, peer: PeerInfo) = Intent(context, HandoffActionReceiver::class.java)
             .setAction(ACTION_PULL)

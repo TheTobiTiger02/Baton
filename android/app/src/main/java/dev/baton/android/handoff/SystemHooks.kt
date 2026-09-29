@@ -137,6 +137,53 @@ class BatonAccessibilityService : AccessibilityService() {
             url
         }
 
+        /**
+         * The first words of the page text at the top of the browser's view, when the page is
+         * scrolled down (null at its top): sent along, the PC's browser scrolls there too.
+         * Read from the accessibility tree the browser exposes for its web content.
+         */
+        suspend fun readAnchor(packageName: String): String? = withContext(Dispatchers.Main) {
+            // Only a browser in front, and only one that shows its page to accessibility
+            // (Chromium's WebView does; Samsung Internet doesn't): otherwise the page goes without.
+            val root = instance?.rootInActiveWindow?.takeIf { it.packageName == packageName } ?: return@withContext null
+            val web = find(root) { it.className?.contains("WebView") == true } ?: return@withContext null
+            val view = android.graphics.Rect().also { web.getBoundsInScreen(it) }
+            var above = false
+            var anchor: String? = null
+            walk(web) { node ->
+                val text = node.text?.toString()?.trim().orEmpty()
+                if (text.length < 30) return@walk true
+                val bounds = android.graphics.Rect().also { node.getBoundsInScreen(it) }
+                when {
+                    !node.isVisibleToUser || bounds.bottom <= view.top -> { above = true; true }
+                    else -> {
+                        anchor = text.split(Regex("\\s+")).take(8).joinToString(" ").takeIf { it.length >= 20 }
+                        anchor == null
+                    }
+                }
+            }
+            anchor.takeIf { above }
+        }
+
+        private fun find(node: AccessibilityNodeInfo, match: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
+            if (match(node)) return node
+            for (index in 0 until node.childCount) {
+                val child = node.getChild(index) ?: continue
+                find(child, match)?.let { return it }
+            }
+            return null
+        }
+
+        /** Depth-first, in reading order, until [visit] returns false. */
+        private fun walk(node: AccessibilityNodeInfo, visit: (AccessibilityNodeInfo) -> Boolean): Boolean {
+            if (!visit(node)) return false
+            for (index in 0 until node.childCount) {
+                val child = node.getChild(index) ?: continue
+                if (!walk(child, visit)) return false
+            }
+            return true
+        }
+
         private const val REVEAL_STEP_MS = 100L
     }
 }

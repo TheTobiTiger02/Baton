@@ -159,7 +159,7 @@ public sealed class AppDirectory
                     return HandoffStatus.Failed;
                 }
 
-                Shell(address);
+                Shell(choice.Url is null ? Media.ContentLinks.WithTextAnchor(address, activity.TextAnchor) : address);
                 return HandoffStatus.Opened;
 
             case ChoiceKinds.App when choice.AppId is { } id:
@@ -172,7 +172,7 @@ public sealed class AppDirectory
                         return HandoffStatus.Failed;
                     }
 
-                    Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, ArgumentList = { url } });
+                    Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, ArgumentList = { Media.ContentLinks.WithTextAnchor(url, activity.TextAnchor) } });
                     return HandoffStatus.Opened;
                 }
 

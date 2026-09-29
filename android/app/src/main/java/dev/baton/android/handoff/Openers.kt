@@ -33,7 +33,8 @@ object Openers {
     suspend fun open(context: Context, activity: Activity, choice: HandoffChoice?): OpenResult {
         when (choice?.kind) {
             ChoiceKinds.WEB -> (choice.url ?: activity.url)?.let { url ->
-                Launcher.start(context, Intent(Intent.ACTION_VIEW, Uri.parse(url)), activity.title)
+                val target = if (choice.url == null) ContentLinks.withTextAnchor(url, activity.textAnchor) else url
+                Launcher.start(context, Intent(Intent.ACTION_VIEW, Uri.parse(target)), activity.title)
                 return OpenResult(HandoffStatus.Opened)
             }
             ChoiceKinds.APP -> choice.appId?.let { app ->
@@ -51,7 +52,12 @@ object Openers {
         val url = activity.url
         if (url != null) {
             val positionMs = activity.playback?.positionAt() ?: 0L
-            val target = if (ContentLinks.youTubeVideoId(url) != null) ContentLinks.withYouTubeTime(url, positionMs) else url
+            // A browser scrolls the page to where it was read; an app gets the plain link.
+            val target = when {
+                ContentLinks.youTubeVideoId(url) != null -> ContentLinks.withYouTubeTime(url, positionMs)
+                KnownApps.fromPackage(app)?.isBrowser == true || LinkApps.isBrowser(context, app) -> ContentLinks.withTextAnchor(url, activity.textAnchor)
+                else -> url
+            }
             val view = Intent(Intent.ACTION_VIEW, Uri.parse(target)).setPackage(app)
             if (view.resolveActivity(context.packageManager) != null) {
                 launch(context, view, activity, app, positionMs.takeIf { activity.playback != null })
@@ -100,12 +106,15 @@ object Openers {
         val videoId = ContentLinks.youTubeVideoId(url)
         val target = if (videoId != null) ContentLinks.withYouTubeTime(url, positionMs) else ContentLinks.withTwitchTime(url, positionMs)
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(target))
+        val linkApp = if (videoId == null) pinned ?: LinkApps.appFor(context, target) else null
         val appPackage = when {
-            videoId == null -> pinned ?: LinkApps.appFor(context, target)
+            videoId == null -> linkApp
             url.contains("music.youtube.com") -> KnownApps.fromProvider("youtubemusic")?.let { installedPackage(context, it, pinned) }
             else -> KnownApps.fromProvider("youtube")?.let { installedPackage(context, it, pinned) }
         }
         if (appPackage != null && isUsable(context, appPackage)) intent.setPackage(appPackage)
+        // A page that opens in the browser scrolls to where it was read on the other device.
+        if (videoId == null && linkApp == null) intent.data = Uri.parse(ContentLinks.withTextAnchor(target, activity.textAnchor))
         // Also for YouTube links with a time: an app already showing that video (paused) only
         // moves there and stays paused, so the session is made to play at the right second.
         // Live streams have no second to move to.

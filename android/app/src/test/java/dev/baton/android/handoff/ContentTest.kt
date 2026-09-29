@@ -39,6 +39,14 @@ class ContentTest {
     }
 
     @Test
+    fun pagesOpenScrolledToTheirText() {
+        assertEquals("https://example.com/a#:~:text=The%20quick%20brown%2C%20fox%2Djumps%20%26%20more",
+            ContentLinks.withTextAnchor("https://example.com/a", "The quick brown, fox-jumps & more"))
+        assertEquals("https://example.com/a#intro:~:text=Hello%20there", ContentLinks.withTextAnchor("https://example.com/a#intro", " Hello there "))
+        assertEquals("https://example.com/a", ContentLinks.withTextAnchor("https://example.com/a", null))
+    }
+
+    @Test
     fun linksOpenInTheSiteAppNotTheBrowser() {
         val browsers = setOf("com.android.chrome", "com.sec.android.app.sbrowser")
         assertEquals("tv.twitch.android.app",

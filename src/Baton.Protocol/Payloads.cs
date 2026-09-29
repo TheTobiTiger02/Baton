@@ -156,10 +156,13 @@ public sealed record Activity(
     ActivityWindow? Window = null,
     double? Volume = null,
     bool? Audible = null,
-    bool? Focused = null)
+    bool? Focused = null,
+    string? TextAnchor = null)
 {
     // Audible: it plays with sound right now (a muted autoplay video does not). Focused: it is in
     // the window (or the browser tab) the user last had in front. Null when the source can't tell.
+    // TextAnchor: the first words of the text at the top of a page's view, so a browser opening
+    // it scrolls there (a #:~:text= fragment); null at the top or for media.
 
     /// <summary>This activity as a peer or a media session reported it, with its playback made safe to compute with.</summary>
     public Activity Normalized() => Playback is { } playback ? this with { Playback = playback.Normalized() } : this;

@@ -33,6 +33,7 @@ internal sealed class AppServices : IDisposable
         };
         Shell.Continue = ContinueAsync;
         Shell.DefaultPhoneId = UserSettings.LastTargetDeviceId;
+        Runtime.DefaultPhone = () => UserSettings.LastTargetDeviceId;
         Clipboard = new Mirror.ClipboardBridge(Host, app.Dispatcher);
         Host.WindowStreams.Quality = UserSettings.StreamQuality;
         Host.WindowStreams.StreamAudio = UserSettings.StreamAudio;
@@ -147,6 +148,7 @@ internal sealed class AppServices : IDisposable
     {
         UserSettings.LastTargetDeviceId = deviceId;
         Shell.DefaultPhoneId = deviceId;
+        Runtime.PublishDevicesToBrowsers();
     }
 
     public Hotkey HotkeyFor(HotkeyAction action) => UserSettings.GetHotkey(action);

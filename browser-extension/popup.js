@@ -43,7 +43,7 @@ chrome.runtime.sendMessage({ type: "popup" }, (state) => {
   ]);
   root.append(card);
 
-  const online = state.devices.filter((d) => d.online);
+  const online = state.devices.filter((d) => d.online).sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0));
   if (online.length === 0) {
     root.append(element("div", { className: "muted", textContent: "No phone connected. Open Baton on your phone." }));
     return;

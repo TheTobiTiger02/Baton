@@ -35,10 +35,67 @@
     };
   }
 
+  /**
+   * The post a video in a feed belongs to (X, Reddit, Instagram, YouTube previews): the page's
+   * own address is the feed, which would open the feed's top on the other device.
+   */
+  function permalink(el) {
+    const host = location.hostname.replace(/^www\./, "");
+    const absolute = (href) => { try { return new URL(href, location.href).href; } catch { return null; } };
+    if (host === "x.com" || host === "twitter.com" || host === "mobile.twitter.com") {
+      const article = el.closest("article");
+      const link = article && ([...article.querySelectorAll('a[href*="/status/"]')].find((a) => a.querySelector("time")) || article.querySelector('a[href*="/status/"]'));
+      const match = link && link.getAttribute("href").match(/^\/?([^/]+)\/status\/(\d+)/);
+      return match ? `https://x.com/${match[1]}/status/${match[2]}/video/1` : null;
+    }
+    if (host.endsWith("reddit.com")) {
+      const post = el.closest("shreddit-post");
+      const path = post && (post.getAttribute("permalink") || (post.querySelector('a[href*="/comments/"]') || {}).href);
+      return path ? absolute(path) : null;
+    }
+    if (host === "instagram.com") {
+      const article = el.closest("article");
+      const link = article && article.querySelector('a[href*="/p/"], a[href*="/reel/"]');
+      return link ? absolute(link.getAttribute("href")) : null;
+    }
+    if (host.endsWith("youtube.com") && !location.pathname.startsWith("/watch") && !location.pathname.startsWith("/shorts")) {
+      const renderer = el.closest("ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer");
+      const link = renderer && renderer.querySelector('a#thumbnail[href*="watch"], a[href*="/watch?v="]');
+      if (link) return absolute(link.getAttribute("href"));
+      // The home page's hover preview plays in a player outside the item it previews.
+      const preview = document.querySelector("ytd-video-preview a#media-container-link, #video-preview a[href*='watch']");
+      return preview ? absolute(preview.getAttribute("href")) : null;
+    }
+    return null;
+  }
+
+  /**
+   * The first words of the text at the top of the view: a browser given them as a text fragment
+   * (#:~:text=) scrolls to the same place, whatever its screen size. Null at the top of the page.
+   */
+  function anchor() {
+    if (window.scrollY < 200) return null;
+    for (const y of [90, 140, 200, 280]) {
+      let node = document.elementFromPoint(window.innerWidth / 2, y);
+      while (node && node !== document.body) {
+        const style = getComputedStyle(node);
+        const fixed = style.position === "fixed" || style.position === "sticky";
+        const text = (node.innerText || "").trim();
+        if (fixed) break;
+        if (text.length >= 30 && node.getBoundingClientRect().height < window.innerHeight * 1.5) {
+          const words = text.split(/\s+/).filter((word) => word.length > 0).slice(0, 8).join(" ");
+          if (words.length >= 20) return words;
+        }
+        node = node.parentElement;
+      }
+    }
+    return null;
+  }
+
   function state() {
     const el = media;
     const info = metadata();
-    if (!el) return { url: location.href, pageTitle: document.title, media: null };
+    if (!el) return { url: location.href, pageTitle: document.title, anchor: anchor(), media: null };
     const live = !isFinite(el.duration);
     return {
       url: location.href,
@@ -52,7 +109,8 @@
         playing: !el.paused && !el.ended,
         rate: el.playbackRate || 1,
         volume: el.muted ? 0 : el.volume,
-        live
+        live,
+        url: permalink(el)
       }
     };
   }
@@ -80,6 +138,13 @@
     report(true);
     if (event.type === "loadedmetadata") chrome.runtime.sendMessage({ type: "ready", url: location.href }).catch(() => {});
   }
+
+  // Scrolling moves the anchor: report it once the page settles.
+  let scrollTimer = null;
+  window.addEventListener("scroll", () => {
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => report(false), 500);
+  }, { passive: true });
 
   // Sites swap their players around (YouTube reuses one element across videos, Twitch replaces it).
   setInterval(() => {
