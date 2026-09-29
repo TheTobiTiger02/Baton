@@ -44,6 +44,7 @@ public partial class ToastWindow : Window
         ActionButton.Visibility = Visibility.Collapsed;
         (Heading.Text, Detail.Text, Glyph.Text) = handoff.Status switch
         {
+            null when handoff.Unconfirmed => ("No confirmation received", handoff.Detail ?? handoff.Title, ""),
             null => (handoff.Title, handoff.Detail ?? $"Moving to {targetName}…", ""),
             HandoffStatus.Opened => ($"Continuing on {targetName}", handoff.Title, ""),
             HandoffStatus.Fallback => ($"Continuing on {targetName}", handoff.Detail ?? handoff.Title, ""),
@@ -65,7 +66,7 @@ public partial class ToastWindow : Window
             _ => "AccentBrush"
         });
 
-        Present(handoff.Status is null ? TimeSpan.FromSeconds(30) : TimeSpan.FromSeconds(handoff.Status == HandoffStatus.Failed ? 7 : 4));
+        Present(handoff.Status is null && !handoff.Unconfirmed ? TimeSpan.FromSeconds(30) : TimeSpan.FromSeconds(handoff.Status == HandoffStatus.Failed ? 7 : 4));
     }
 
     private void Present(TimeSpan duration)

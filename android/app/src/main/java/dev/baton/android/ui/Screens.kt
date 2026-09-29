@@ -600,6 +600,7 @@ private fun HomeScreen(grants: Grants, onSettings: (() -> Unit)?) {
                         Text(if (showMore) "Less" else if (morePc.size + moreLocal.size + phoneItems > 0) "More (${morePc.size + moreLocal.size + phoneItems})" else "More")
                     }
                 }
+                item { RecentHandoffs() }
                 if (showMore) {
                     if (morePc.isNotEmpty()) item { SectionTitle("Also on ${pc?.name ?: "your PC"}") }
                     morePc.forEach { activity ->
@@ -664,6 +665,57 @@ private fun NoticeBanner(notice: HandoffNotice) {
                     color = if (notice.failed) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.inverseOnSurface)
             }
         }
+    }
+}
+
+@Composable
+private fun RecentHandoffs() {
+    val records by HandoffEngine.history.recent.collectAsState()
+    val peers by Link.peers.collectAsState()
+    val local by HandoffEngine.local.collectAsState()
+    val status by Link.status.collectAsState()
+    var expanded by remember { mutableStateOf(false) }
+    var confirm by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    fun name(id: String) = if (id == Link.deviceId) "This phone" else peers.firstOrNull { it.deviceId == id }?.name ?: "Unavailable device"
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space2)) {
+        TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
+            Text("Recent handoffs (${records.size}) · ${if (expanded) "Hide" else "Show"}")
+        }
+        if (expanded) {
+            TextButton(onClick = { HandoffEngine.history.clear() }, modifier = Modifier.align(Alignment.End)) { Text("Clear history") }
+            if (records.isEmpty()) Text("No handoffs in this session.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            records.forEach { record ->
+                val availability = remember(record, peers, local, status) { HandoffEngine.recovery(record) }
+                val couldStream = record.intent.source == Link.deviceId || record.intent.activity?.window != null ||
+                    peers.any { it.deviceId == record.intent.source && it.kind == "phone" }
+                Card(shape = RoundedCornerShape(Tokens.CardRadius), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(Tokens.Space4), verticalArrangement = Arrangement.spacedBy(Tokens.Space2)) {
+                        Text(record.title, style = MaterialTheme.typography.titleMedium)
+                        Text("${java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(record.startedAt))} · ${name(record.intent.source)} → ${name(record.intent.target)}",
+                            style = MaterialTheme.typography.bodySmall)
+                        Text(record.outcome)
+                        Text(record.detail, style = MaterialTheme.typography.bodySmall)
+                        if (record.recoverable || record.status == dev.baton.android.protocol.HandoffStatus.Fallback) {
+                            availability.third?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space2)) {
+                                if (record.recoverable) OutlinedButton(enabled = availability.first, onClick = {
+                                    if (record.unconfirmed) confirm = record.requestId to false else HandoffEngine.recover(record.requestId)
+                                }) { Text("Retry") }
+                                if (couldStream) OutlinedButton(enabled = availability.second, onClick = {
+                                    if (record.unconfirmed) confirm = record.requestId to true else HandoffEngine.recover(record.requestId, true)
+                                }) { Text("Stream instead") }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    confirm?.let { request ->
+        AlertDialog(onDismissRequest = { confirm = null }, title = { Text("Retry handoff?") },
+            text = { Text("The destination hasn't confirmed this transfer. The activity may already have opened. Try again?") },
+            confirmButton = { TextButton(onClick = { confirm = null; HandoffEngine.recover(request.first, request.second) }) { Text("Try again") } },
+            dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } })
     }
 }
 

@@ -14,6 +14,33 @@ let sendTimer = null;
 // development build carries in config.js. Until Baton knows it, the popup says to allow it.
 let token = globalThis.BATON_TOKEN || null;
 let awaitingApproval = false;
+let confirmsHandoffs = false;
+const transfers = new Map();
+
+function startTransfer(message) {
+  const previous = message.previousRequestId && transfers.get(message.previousRequestId);
+  if (previous) message = { ...message, tabId: previous.tabId, targetDeviceId: previous.targetDeviceId,
+    url: previous.url, sourceUrl: previous.sourceUrl };
+  const requestId = crypto.randomUUID();
+  const transfer = { requestId, tabId: message.tabId, targetDeviceId: message.targetDeviceId, url: message.url,
+    sourceUrl: message.sourceUrl || tabs.get(message.tabId)?.url, status: "pending", detail: "Sending…", startedAt: Date.now() };
+  transfers.set(requestId, transfer);
+  while (transfers.size > 40) transfers.delete(transfers.keys().next().value);
+  if (message.previousRequestId && (!previous || !previous.sent && !previous.url &&
+      (!previous.sourceUrl || tabs.get(previous.tabId)?.url !== previous.sourceUrl))) {
+    Object.assign(transfer, { status: "failed", detail: "The original activity is no longer available. Open the original page to continue it again." });
+    return transfer;
+  }
+  const sent = send(previous?.sent
+    ? { type: "handoffRetry", requestId, previousRequestId: previous.requestId }
+    : message.url ? { type: "sendUrl", requestId, url: message.url, targetDeviceId: message.targetDeviceId }
+    : { type: "send", requestId, tabId: message.tabId, targetDeviceId: message.targetDeviceId });
+  transfer.sent = sent;
+  if (!sent) Object.assign(transfer, { status: "failed", detail: "Baton is disconnected. Reconnect before retrying." });
+  else if (!confirmsHandoffs) Object.assign(transfer, { status: "unsupported", detail: "Request sent; destination status unavailable. Update Baton on this PC for confirmed feedback." });
+  return transfer;
+}
+
 const tokenLoaded = chrome.storage.local.get("batonToken").then((stored) => {
   if (stored && stored.batonToken) token = stored.batonToken;
 }).catch(() => {});
@@ -51,12 +78,17 @@ function connect() {
   socket.onclose = () => {
     socket = null;
     devices = [];
+    confirmsHandoffs = false;
+    for (const transfer of transfers.values()) {
+      if (transfer.status === "pending") Object.assign(transfer, { status: "unconfirmed", detail: "Connection lost. The activity may already have opened." });
+    }
   };
   socket.onerror = () => {};
 }
 
 function send(message) {
-  if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+  if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+  try { socket.send(JSON.stringify(message)); return true; } catch { return false; }
 }
 
 // The worker sleeps when idle; the alarm wakes it to reconnect after the app starts.
@@ -175,11 +207,12 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
   // From the popup.
   if (message.type === "popup") {
-    activeTabId().then((tabId) => reply({ connected: !!(socket && socket.readyState === WebSocket.OPEN), awaitingApproval, devices, tab: tabId !== null ? tabs.get(tabId) : null, tabId }));
+    activeTabId().then((tabId) => reply({ connected: !!(socket && socket.readyState === WebSocket.OPEN), awaitingApproval, devices, confirmsHandoffs, transfers: [...transfers.values()].filter(t => t.tabId === tabId).reverse(), tab: tabId !== null ? tabs.get(tabId) : null, tabId }));
     return true;
   }
   if (message.type === "sendTab") {
-    send({ type: "send", tabId: message.tabId, targetDeviceId: message.targetDeviceId });
+    if (sender.tab) return;
+    reply(startTransfer(message));
   }
 });
 
@@ -203,15 +236,22 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   const id = String(info.menuItemId);
   if (!id.startsWith("baton-send:") || !tab) return;
   const targetDeviceId = id.slice("baton-send:".length);
-  if (info.linkUrl) {
-    send({ type: "sendUrl", url: info.linkUrl, title: info.linkUrl, targetDeviceId });
-  } else {
-    send({ type: "send", tabId: tab.id, targetDeviceId });
-  }
+  startTransfer({ tabId: tab.id, targetDeviceId, url: info.linkUrl, sourceUrl: tab.url });
 });
 
 async function onHostMessage(message) {
   switch (message.type) {
+    case "capabilities":
+      confirmsHandoffs = message.handoffStatus === true;
+      break;
+    case "handoffStatus": {
+      const transfer = transfers.get(message.requestId);
+      if (transfer && (transfer.status === "pending" || transfer.status === "unconfirmed" ||
+          message.status === "failed" && ["opened", "fallback"].includes(transfer.status))) {
+        Object.assign(transfer, { status: message.status, detail: message.detail || "Destination reported the activity opened.", title: message.title });
+      }
+      break;
+    }
     case "devices":
       devices = message.devices;
       awaitingApproval = false;

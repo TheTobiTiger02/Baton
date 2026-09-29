@@ -32,6 +32,9 @@ $props = Join-Path $root 'Directory.Build.props'
 dotnet test (Join-Path $root 'tests\Baton.Tests') --nologo
 if ($LASTEXITCODE -ne 0) { throw 'PC tests failed.' }
 
+node --test (Join-Path $root 'tests\browser-extension\handoff.test.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Browser extension tests failed.' }
+
 $windows = Join-Path $out 'windows'
 dotnet publish (Join-Path $root 'src\Baton.App\Baton.App.csproj') -c Release -r win-x64 --self-contained true -o $windows --nologo
 if ($LASTEXITCODE -ne 0) { throw 'Windows build failed.' }

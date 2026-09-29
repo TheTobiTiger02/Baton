@@ -14,11 +14,9 @@ namespace Baton.Host.Handoff;
 /// activity opens at once from what is known, while the source is asked for the exact position;
 /// when that arrives, only the position is corrected.
 /// </summary>
-public sealed class HandoffCoordinator
+public sealed class HandoffCoordinator : IDisposable
 {
     private static readonly TimeSpan BroadcastDebounce = TimeSpan.FromMilliseconds(150);
-    private static readonly TimeSpan PendingLifetime = TimeSpan.FromMinutes(2);
-
     private readonly BatonHost _host;
     private readonly IReadOnlyList<IActivitySource> _sources;
     private readonly IReadOnlyList<IActivityOpener> _openers;
@@ -26,7 +24,10 @@ public sealed class HandoffCoordinator
     private readonly AppDirectory? _apps;
     private readonly ConcurrentDictionary<string, ActivityListPayload> _phoneActivities = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, (HandoffEvent Event, DateTimeOffset StartedAt)> _pending = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, Activity> _speculative = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, (Activity Activity, Task<OpenResult> Open)> _speculative = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte> _opening = new(StringComparer.Ordinal);
+    private readonly Timer _expiry;
+    public HandoffHistory History { get; } = new();
     private readonly HandoffSuggestions _suggestions = new();
     private readonly object _broadcastGate = new();
     private IReadOnlyList<Activity> _localActivities = [];
@@ -72,6 +73,62 @@ public sealed class HandoffCoordinator
         host.Devices.Changed += ScheduleBroadcast;
         host.DeviceNames.Changed += ScheduleBroadcast;
         RefreshLocal();
+        _expiry = new Timer(_ => ExpirePending(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+
+    public void Dispose() => _expiry.Dispose();
+    private void ExpirePending()
+    {
+        foreach (var expired in History.Expire(DateTimeOffset.UtcNow))
+            HandoffUpdated?.Invoke(expired);
+        foreach (var item in _pending.Where(pair => DateTimeOffset.UtcNow - pair.Value.StartedAt >= HandoffHistory.PendingLifetime))
+        {
+            _pending.TryRemove(item.Key, out _);
+        }
+    }
+
+    public (bool Retry, bool Stream, string? Reason) Recovery(HandoffRecord record)
+    {
+        if (record.Intent is not { } intent) return (false, false, "This transfer has no recoverable activity.");
+        var devices = GetDevices();
+        if (devices.FirstOrDefault(d => d.DeviceId == intent.SourceDeviceId)?.Online != true ||
+            devices.FirstOrDefault(d => d.DeviceId == intent.TargetDeviceId)?.Online != true)
+            return (false, false, "Connect both devices to recover this handoff.");
+        var activity = intent.Standalone ? intent.Activity : FindActivity(intent.SourceDeviceId, intent.ActivityId);
+        if (!intent.Standalone && activity is not null && intent.Activity is { } original &&
+            (original.Url is not null && activity.Url is not null
+                ? !Baton.Host.Browser.BrowserBridge.SamePage(original.Url, activity.Url)
+                : original.Title != activity.Title)) activity = null;
+        if (activity is null) return (false, false, "The original activity is no longer available.");
+        var canStream = intent.SourceDeviceId == LocalDeviceId ? CanStream(activity) :
+            intent.TargetDeviceId == LocalDeviceId && devices.FirstOrDefault(d => d.DeviceId == intent.SourceDeviceId)?.Kind == DeviceKinds.Phone;
+        return (record.Recoverable, canStream && (record.Recoverable || record.Event.Status == HandoffStatus.Fallback), null);
+    }
+
+    public async Task RecoverAsync(string requestId, bool stream = false, string? newRequestId = null)
+    {
+        var record = History.Find(requestId);
+        if (record?.Intent is not { } intent) return;
+        var allowed = Recovery(record);
+        if (!(stream ? allowed.Stream : allowed.Retry))
+        {
+            if (newRequestId is not null) Report(new HandoffEvent(newRequestId, intent.SourceDeviceId, intent.TargetDeviceId,
+                record.Event.Title, HandoffStatus.Failed, allowed.Reason ?? "This handoff cannot be retried."));
+            return;
+        }
+        var mode = stream ? HandoffModes.Stream : intent.Mode;
+        var choice = stream ? new HandoffChoice(ChoiceKinds.Stream, "Stream") : intent.Choice is { } chosen ? chosen with { Remember = false } : null;
+        newRequestId ??= NewRequestId();
+        try
+        {
+            if (intent.SourceDeviceId == LocalDeviceId)
+            {
+                if (intent.Standalone && intent.Activity is { } activity) await SendActivityAsync(intent.TargetDeviceId, activity, mode, choice, newRequestId);
+                else await SendAsync(intent.TargetDeviceId, intent.ActivityId, mode, choice, newRequestId);
+            }
+            else await PullAsync(intent.SourceDeviceId, intent.ActivityId, intent.TargetDeviceId, mode, choice, newRequestId);
+        }
+        catch (Exception ex) { Finish(newRequestId, HandoffStatus.Failed, ex.Message); }
     }
 
     /// <summary>The group changed: devices, their activities or presence. Any thread.</summary>
@@ -226,16 +283,15 @@ public sealed class HandoffCoordinator
     }
 
     /// <summary>Hands one of this PC's activities (the top one when null) to a phone.</summary>
-    public Task SendAsync(string targetDeviceId, string? activityId = null, string mode = HandoffModes.Auto, HandoffChoice? choice = null) =>
-        DeliverLocalAsync(NewRequestId(), targetDeviceId, activityId, mode, choice);
-
+    public Task SendAsync(string targetDeviceId, string? activityId = null, string mode = HandoffModes.Auto, HandoffChoice? choice = null, string? requestId = null) =>
+        DeliverLocalAsync(requestId ?? NewRequestId(), targetDeviceId, activityId, mode, choice);
     /// <summary>
     /// Asks a device for its activity (its top one when null), to continue on
     /// <paramref name="targetDeviceId"/> (this PC when null). When it continues here, it opens
     /// right away from what is already known, and is corrected when the exact position arrives.
     /// </summary>
     public async Task PullAsync(string sourceDeviceId, string? activityId = null, string? targetDeviceId = null, string mode = HandoffModes.Auto,
-        HandoffChoice? choice = null)
+        HandoffChoice? choice = null, string? requestId = null)
     {
         var target = targetDeviceId ?? LocalDeviceId;
         var known = FindActivity(sourceDeviceId, activityId);
@@ -253,13 +309,13 @@ public sealed class HandoffCoordinator
         // Opens here at once from what is known: the content (corrected when the exact position
         // arrives), or the app the user picked, which needs nothing from the phone at all.
         var speculative = target == LocalDeviceId && known is not null && !Streams(choice, mode, known);
-        var request = new HandoffPullPayload(NewRequestId(), sourceDeviceId, target, activityId ?? known?.Id, speculative, mode, choice);
+        var request = new HandoffPullPayload(requestId ?? NewRequestId(), sourceDeviceId, target, activityId ?? known?.Id, speculative, mode, choice);
         _host.Timeline.Mark(request.RequestId, "pull");
-        Track(new HandoffEvent(request.RequestId, sourceDeviceId, target, known?.Title ?? "Activity", null, "Asking the phone…"));
+        Track(new HandoffEvent(request.RequestId, sourceDeviceId, target, known?.Title ?? "Activity", null, "Asking the phone…"),
+            new HandoffIntent(sourceDeviceId, target, request.ActivityId, mode, choice, known));
         if (speculative)
         {
-            _speculative[request.RequestId] = known!;
-            _ = OpenHereAsync(request.RequestId, sourceDeviceId, known!, speculative: true, choice);
+            _speculative[request.RequestId] = (known!, OpenHereAsync(request.RequestId, sourceDeviceId, known!, speculative: true, choice));
         }
 
         if (!await _host.SendWhenConnectedAsync(sourceDeviceId, MessageTypes.HandoffPull, request))
@@ -269,11 +325,12 @@ public sealed class HandoffCoordinator
     }
 
     /// <summary>Hands over an activity that no source tracks, such as a link picked from a context menu.</summary>
-    public async Task SendActivityAsync(string targetDeviceId, Activity activity, string mode = HandoffModes.Auto, HandoffChoice? choice = null)
+    public async Task SendActivityAsync(string targetDeviceId, Activity activity, string mode = HandoffModes.Auto, HandoffChoice? choice = null, string? requestId = null)
     {
-        var requestId = NewRequestId();
+        requestId ??= NewRequestId();
         _host.Timeline.Mark(requestId, "send");
-        Track(new HandoffEvent(requestId, LocalDeviceId, targetDeviceId, activity.Title, null, "Sending…"));
+        Track(new HandoffEvent(requestId, LocalDeviceId, targetDeviceId, activity.Title, null, "Sending…"),
+            new HandoffIntent(LocalDeviceId, targetDeviceId, activity.Id, mode, choice, activity, true));
         await DeliverAsync(requestId, targetDeviceId, activity with { DeviceId = LocalDeviceId }, mode, choice);
     }
 
@@ -321,12 +378,13 @@ public sealed class HandoffCoordinator
             return;
         }
 
-        Track(new HandoffEvent(requestId, LocalDeviceId, targetDeviceId, candidate.Title, null, "Sending…"));
         if (mode == HandoffModes.Auto)
         {
             choice ??= Implicit(candidate, LocalDeviceId, targetDeviceId);
         }
 
+        Track(new HandoffEvent(requestId, LocalDeviceId, targetDeviceId, candidate.Title, null, "Sending…"),
+            new HandoffIntent(LocalDeviceId, targetDeviceId, candidate.Id, mode, choice, candidate));
         RememberIfAsked(candidate, LocalDeviceId, targetDeviceId, choice);
         var stream = Streams(choice, mode, candidate);
         var source = _sources.FirstOrDefault(item => item.Current.Any(activity => activity.Id == candidate.Id));
@@ -339,11 +397,21 @@ public sealed class HandoffCoordinator
         catch (Exception ex)
         {
             _host.Diagnostics.Record(DiagnosticsCategory.Handoff, "take.failed", ex.Message, severity: DiagnosticsSeverity.Warning);
-            activity = candidate;
+            Finish(requestId, HandoffStatus.Failed, "Couldn't obtain a fresh activity snapshot.");
+            await _host.SendAsync(targetDeviceId, MessageTypes.HandoffResult, new HandoffResultPayload(
+                requestId, LocalDeviceId, targetDeviceId, HandoffStatus.Failed, "Couldn't obtain a fresh activity snapshot."));
+            return;
         }
 
+        if (activity is null)
+        {
+            Finish(requestId, HandoffStatus.Failed, "The original activity is no longer available.");
+            await _host.SendAsync(targetDeviceId, MessageTypes.HandoffResult, new HandoffResultPayload(
+                requestId, LocalDeviceId, targetDeviceId, HandoffStatus.Failed, "The original activity is no longer available."));
+            return;
+        }
         _host.Timeline.Mark(requestId, "taken");
-        activity = (activity ?? candidate) with { DeviceId = LocalDeviceId, Window = (activity ?? candidate).Window ?? candidate.Window };
+        activity = activity with { DeviceId = LocalDeviceId, Window = activity.Window ?? candidate.Window };
         if (!stream && candidate.Playback is { Playing: true } playing)
         {
             // The source's answer lost the player (a tab whose page script isn't there): the
@@ -415,14 +483,19 @@ public sealed class HandoffCoordinator
             case MessageTypes.HandoffPull:
             {
                 var pull = envelope.ReadRequired<HandoffPullPayload>();
+                if (deviceId != pull.SourceDeviceId && deviceId != pull.TargetDeviceId) break;
                 _host.Timeline.Mark(pull.RequestId, $"pull from {deviceId[..Math.Min(12, deviceId.Length)]}");
-                RememberIfAsked(FindActivity(pull.SourceDeviceId, pull.ActivityId), pull.SourceDeviceId, pull.TargetDeviceId, pull.Choice);
+                var known = FindActivity(pull.SourceDeviceId, pull.ActivityId);
+                Track(new HandoffEvent(pull.RequestId, pull.SourceDeviceId, pull.TargetDeviceId, known?.Title ?? "Activity", null, "Requesting activity…"),
+                    new HandoffIntent(pull.SourceDeviceId, pull.TargetDeviceId, pull.ActivityId ?? known?.Id, pull.Mode, pull.Choice, known));
+                RememberIfAsked(known, pull.SourceDeviceId, pull.TargetDeviceId, pull.Choice);
                 if (pull.SourceDeviceId == LocalDeviceId)
                 {
                     await DeliverLocalAsync(pull.RequestId, pull.TargetDeviceId, pull.ActivityId, pull.Mode, pull.Choice);
                 }
                 else if (!await _host.SendWhenConnectedAsync(pull.SourceDeviceId, MessageTypes.HandoffPull, pull))
                 {
+                    Finish(pull.RequestId, HandoffStatus.Failed, "That device is offline.");
                     await _host.SendAsync(deviceId, MessageTypes.HandoffResult, new HandoffResultPayload(
                         pull.RequestId, pull.SourceDeviceId, pull.TargetDeviceId, HandoffStatus.Failed, "That device is offline."));
                 }
@@ -433,29 +506,29 @@ public sealed class HandoffCoordinator
             case MessageTypes.HandoffDeliver:
             {
                 var received = envelope.ReadRequired<HandoffDeliverPayload>();
+                if (received.SourceDeviceId != deviceId) break;
                 var deliver = received with { Activity = received.Activity.Normalized() };
+                var original = History.Find(deliver.RequestId)?.Event;
+                if (original is not null && (original.SourceDeviceId != deliver.SourceDeviceId || original.TargetDeviceId != deliver.TargetDeviceId)) break;
+                if (History.Find(deliver.RequestId)?.Event.Status is { } finished)
+                {
+                    await _host.SendAsync(deviceId, MessageTypes.HandoffResult, new HandoffResultPayload(deliver.RequestId,
+                        deliver.SourceDeviceId, deliver.TargetDeviceId, finished, History.Find(deliver.RequestId)?.Event.Detail));
+                    break;
+                }
+                Track(new HandoffEvent(deliver.RequestId, deliver.SourceDeviceId, deliver.TargetDeviceId, deliver.Activity.Title, null, "Activity received…"),
+                    History.Find(deliver.RequestId)?.Intent is { } originalIntent
+                        ? originalIntent with { ActivityId = originalIntent.ActivityId ?? deliver.Activity.Id, Activity = deliver.Activity }
+                        : new HandoffIntent(deliver.SourceDeviceId, deliver.TargetDeviceId, deliver.Activity.Id,
+                            deliver.Stream is null ? HandoffModes.Auto : HandoffModes.Stream, deliver.Choice, deliver.Activity));
                 RememberIfAsked(deliver.Activity, deliver.SourceDeviceId, deliver.TargetDeviceId, deliver.Choice);
                 if (deliver.TargetDeviceId == LocalDeviceId)
                 {
-                    _host.Timeline.Mark(deliver.RequestId, "deliver received");
-                    if (deliver.Stream is { Kind: StreamKinds.Phone } phoneStream)
-                    {
-                        PhoneStreamOffered?.Invoke(deliver.SourceDeviceId, deliver.Activity, phoneStream);
-                        Finish(deliver.RequestId, HandoffStatus.Opened, null);
-                        await _host.SendAsync(deliver.SourceDeviceId, MessageTypes.HandoffResult, new HandoffResultPayload(
-                            deliver.RequestId, deliver.SourceDeviceId, LocalDeviceId, HandoffStatus.Opened));
-                    }
-                    else if (_speculative.TryRemove(deliver.RequestId, out var opened))
-                    {
-                        _ = ReconcileAsync(deliver.RequestId, opened, deliver.Activity);
-                    }
-                    else
-                    {
-                        _ = OpenAndReportAsync(deliver);
-                    }
+                    if (_opening.TryAdd(deliver.RequestId, 0)) _ = ReceiveHereAsync(deliver);
                 }
                 else if (!await _host.SendWhenConnectedAsync(deliver.TargetDeviceId, MessageTypes.HandoffDeliver, deliver))
                 {
+                    Finish(deliver.RequestId, HandoffStatus.Failed, "That device is offline.");
                     await _host.SendAsync(deviceId, MessageTypes.HandoffResult, new HandoffResultPayload(
                         deliver.RequestId, deliver.SourceDeviceId, deliver.TargetDeviceId, HandoffStatus.Failed, "That device is offline."));
                 }
@@ -466,6 +539,9 @@ public sealed class HandoffCoordinator
             case MessageTypes.HandoffResult:
             {
                 var result = envelope.ReadRequired<HandoffResultPayload>();
+                var original = History.Find(result.RequestId)?.Event ?? (_pending.TryGetValue(result.RequestId, out var active) ? active.Event : null);
+                if (original is null || original.SourceDeviceId != result.SourceDeviceId || original.TargetDeviceId != result.TargetDeviceId ||
+                    (deviceId != result.TargetDeviceId && !(deviceId == result.SourceDeviceId && result.Status == HandoffStatus.Failed))) break;
                 _host.Timeline.Mark(result.RequestId, $"result {result.Status}");
                 if (result.OpenedMs is { } openedMs)
                 {
@@ -473,7 +549,7 @@ public sealed class HandoffCoordinator
                 }
 
                 _host.Diagnostics.Record(DiagnosticsCategory.Handoff, "result", $"{result.Status}: {result.Detail}", deviceId);
-                if (result.SourceDeviceId == LocalDeviceId || _pending.ContainsKey(result.RequestId))
+                if (original is not null)
                 {
                     Finish(result.RequestId, result.Status, result.Detail);
                 }
@@ -530,6 +606,32 @@ public sealed class HandoffCoordinator
         var result = await OpenHereAsync(deliver.RequestId, deliver.SourceDeviceId, activity, speculative: false, deliver.Choice);
         await _host.SendAsync(deliver.SourceDeviceId, MessageTypes.HandoffResult, new HandoffResultPayload(
             deliver.RequestId, deliver.SourceDeviceId, LocalDeviceId, result.Status, result.Detail));
+    }
+
+    private async Task ReceiveHereAsync(HandoffDeliverPayload deliver)
+    {
+        try
+        {
+            _host.Timeline.Mark(deliver.RequestId, "deliver received");
+            if (deliver.Stream is { Kind: StreamKinds.Phone } phoneStream)
+            {
+                PhoneStreamOffered?.Invoke(deliver.SourceDeviceId, deliver.Activity, phoneStream);
+                const string detail = "Screen viewer opened; picture follows after screen-sharing consent.";
+                Finish(deliver.RequestId, HandoffStatus.Opened, detail);
+                await _host.SendAsync(deliver.SourceDeviceId, MessageTypes.HandoffResult,
+                    new HandoffResultPayload(deliver.RequestId, deliver.SourceDeviceId, LocalDeviceId, HandoffStatus.Opened, detail));
+            }
+            else if (_speculative.TryRemove(deliver.RequestId, out var opened))
+                await CompleteSpeculativeAsync(deliver, opened.Activity, opened.Open);
+            else await OpenAndReportAsync(deliver);
+        }
+        catch (Exception ex)
+        {
+            Finish(deliver.RequestId, HandoffStatus.Failed, ex.Message);
+            await _host.SendAsync(deliver.SourceDeviceId, MessageTypes.HandoffResult,
+                new HandoffResultPayload(deliver.RequestId, deliver.SourceDeviceId, LocalDeviceId, HandoffStatus.Failed, ex.Message));
+        }
+        finally { _opening.TryRemove(deliver.RequestId, out _); }
     }
 
     private async Task<OpenResult> OpenHereAsync(string requestId, string sourceDeviceId, Activity activity, bool speculative, HandoffChoice? choice = null)
@@ -594,7 +696,9 @@ public sealed class HandoffCoordinator
         }
 
         _host.Timeline.Mark(requestId, speculative ? "opened (speculative)" : "opened");
-        Finish(requestId, result.Status, result.Detail);
+        if (!speculative) Finish(requestId, result.Status, result.Detail);
+        else Track(new HandoffEvent(requestId, sourceDeviceId, LocalDeviceId, activity.Title, null,
+            result.Status == HandoffStatus.Failed ? "Waiting for the source to retry opening…" : "Opened here; waiting for the source snapshot…"));
         return result;
     }
 
@@ -602,15 +706,16 @@ public sealed class HandoffCoordinator
     /// The exact snapshot of something already opened here arrived: move to its position if the
     /// guess was off. Anything else about it is what was opened.
     /// </summary>
-    private async Task ReconcileAsync(string requestId, Activity opened, Activity exact)
+    private async Task<bool> ReconcileAsync(string requestId, Activity opened, Activity exact)
     {
         var now = DateTimeOffset.UtcNow;
         var guessed = opened.Playback?.PositionAt(now);
         var actual = exact.Playback?.PositionAt(now);
         if (guessed is null || actual is null || Math.Abs(guessed.Value - actual.Value) <= 2_000)
         {
-            _host.Timeline.Mark(requestId, "position already right");
-            return;
+            _host.Timeline.Mark(requestId, "no position correction requested");
+            // Matching source snapshots do not confirm the destination player's position.
+            return false;
         }
 
         _host.Timeline.Mark(requestId, $"correcting position by {(actual - guessed) / 1000} s");
@@ -619,9 +724,10 @@ public sealed class HandoffCoordinator
             if (await opener.ReconcileAsync(exact, actual.Value, CancellationToken.None))
             {
                 _host.Timeline.Mark(requestId, "position corrected");
-                return;
+                return true;
             }
         }
+        return false;
     }
 
     private Activity? FindActivity(string deviceId, string? activityId)
@@ -680,27 +786,49 @@ public sealed class HandoffCoordinator
         }, TaskScheduler.Default);
     }
 
-    private void Track(HandoffEvent handoff)
+    private void Track(HandoffEvent handoff, HandoffIntent? intent = null)
     {
-        foreach (var stale in _pending.Where(pair => DateTimeOffset.UtcNow - pair.Value.StartedAt > PendingLifetime))
+        var existing = History.Find(handoff.RequestId);
+        if (existing?.Event.Status is not null || existing?.Event.Unconfirmed == true) return;
+        var started = _pending.TryGetValue(handoff.RequestId, out var old) ? old.StartedAt : DateTimeOffset.UtcNow;
+        _pending[handoff.RequestId] = (handoff, started);
+        if (History.Observe(handoff, intent)) HandoffUpdated?.Invoke(handoff);
+        foreach (var stale in _pending.OrderByDescending(pair => pair.Value.StartedAt).Skip(40).ToArray())
         {
             _pending.TryRemove(stale.Key, out _);
             _speculative.TryRemove(stale.Key, out _);
         }
 
-        _pending[handoff.RequestId] = (handoff, DateTimeOffset.UtcNow);
-        HandoffUpdated?.Invoke(handoff);
     }
 
+    public void FailRequest(string requestId, string detail) => Finish(requestId, HandoffStatus.Failed, detail);
     private void Finish(string requestId, HandoffStatus status, string? detail)
     {
-        if (_pending.TryRemove(requestId, out var pending))
-        {
-            Report(pending.Event with { Status = status, Detail = detail });
-        }
+        _speculative.TryRemove(requestId, out _);
+        var value = _pending.TryRemove(requestId, out var pending) ? pending.Event : History.Find(requestId)?.Event;
+        if (value is not null && History.Find(requestId) is not null) Report(value with { Status = status, Detail = detail, Unconfirmed = false });
     }
 
-    private void Report(HandoffEvent handoff) => HandoffUpdated?.Invoke(handoff);
+    private void Report(HandoffEvent handoff)
+    {
+        if (History.Observe(handoff)) HandoffUpdated?.Invoke(handoff);
+    }
+
+    private async Task CompleteSpeculativeAsync(HandoffDeliverPayload deliver, Activity guessed, Task<OpenResult> opening)
+    {
+        var result = await opening;
+        if (result.Status == HandoffStatus.Failed)
+        {
+            await OpenAndReportAsync(deliver);
+            return;
+        }
+        var corrected = await ReconcileAsync(deliver.RequestId, guessed, deliver.Activity);
+        var detail = result.Status != HandoffStatus.Opened || deliver.Activity.Playback is null ? result.Detail ?? "Opened on this PC." :
+            corrected ? "Opened; playback position reconciled." : "Opened; playback position could not be confirmed.";
+        Finish(deliver.RequestId, result.Status, detail);
+        await _host.SendAsync(deliver.SourceDeviceId, MessageTypes.HandoffResult,
+            new HandoffResultPayload(deliver.RequestId, deliver.SourceDeviceId, LocalDeviceId, result.Status, detail));
+    }
 
     private static string NewRequestId() => Guid.NewGuid().ToString("N");
 }

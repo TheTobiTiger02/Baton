@@ -10,3 +10,6 @@ android/keystore.properties
 *.jks
 *.keystore
 artifacts/
+
+.projectatlas/
+android/.kotlin/

@@ -47,6 +47,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.delay
 /**
  * The phone's half of a handoff: keeps the PC told what this phone could hand over, hands an
  * activity over on request (pausing it here), and continues activities handed to this phone.
@@ -61,6 +64,62 @@ object HandoffEngine {
     private var appContext: Context? = null
     private var presence = PresenceState.Active
     private val publish = Runnable { publishNow() }
+
+    val history = HandoffHistory()
+    private var expiry: kotlinx.coroutines.Job? = null
+    private fun begin(id: String, activity: Activity?, source: String, target: String, mode: String, choice: HandoffChoice?,
+        title: String = activity?.title ?: "Activity", standalone: Boolean = false, activityId: String? = activity?.id) {
+        history.begin(id, title, HandoffIntent(source, target, activityId, mode, choice, activity?.copy(artworkJpegBase64 = null), standalone), "Requesting activity…")
+    }
+
+    private fun notice(value: HandoffNotice) {
+        history.progress(value.requestId, value.text)
+        Link.notice(value)
+    }
+
+    private fun finish(id: String, status: HandoffStatus, detail: String?) {
+        val record = history.finish(id, status, detail) ?: return
+        notice(HandoffNotice(id, record.title, record.detail, status == HandoffStatus.Failed, true))
+    }
+    fun fail(requestId: String, detail: String) = finish(requestId, HandoffStatus.Failed, detail)
+    fun recovery(record: HandoffRecord): Triple<Boolean, Boolean, String?> {
+        val intent = record.intent
+        if (!Link.isReady || listOf(intent.source, intent.target).any { id ->
+                id != Link.deviceId && Link.peers.value.none { it.deviceId == id && it.online } })
+            return Triple(false, false, "Connect both devices to recover this handoff.")
+        val activity = recoverActivity(intent) ?: return Triple(false, false, "The original activity is no longer available.")
+        val streamable = if (intent.source == Link.deviceId) intent.target == Link.hostId
+            else Link.peers.value.any { it.deviceId == intent.source && it.kind == "pc" } && activity.window != null
+        return Triple(record.recoverable, streamable && (record.recoverable || record.status == HandoffStatus.Fallback), null)
+    }
+
+    private fun recoverActivity(intent: HandoffIntent): Activity? {
+        if (intent.standalone) {
+            val original = intent.activity ?: return null
+            if (original.playback == null) return original
+            val fresh = computeLocal().firstOrNull { it.app.id == original.app.id && it.title == original.title } ?: return null
+            return original.copy(playback = fresh.playback, updatedAt = fresh.updatedAt)
+        }
+        if (intent.source == Link.deviceId) {
+            return computeLocal().firstOrNull { it.id == intent.activityId && intent.matches(it) } ?: appContext?.let { context ->
+                AppCatalog.apps(context).firstOrNull { "app:${it.id}" == intent.activityId }?.let { AppCatalog.activity(context, it) }
+            }
+        }
+        return Link.peers.value.firstOrNull { it.deviceId == intent.source }?.activities?.firstOrNull { it.id == intent.activityId && intent.matches(it) }
+    }
+    fun recover(requestId: String, stream: Boolean = false) {
+        val record = history.find(requestId) ?: return
+        val allowed = recovery(record)
+        if (!(if (stream) allowed.second else allowed.first)) return
+        val intent = record.intent
+        val activity = recoverActivity(intent) ?: return
+        val mode = if (stream) HandoffModes.STREAM else intent.mode
+        val choice = if (stream) HandoffChoice(ChoiceKinds.STREAM, "Stream") else intent.choice?.copy(remember = false)
+        if (intent.source == Link.deviceId) {
+            scope.launch { deliverLocal(Wire.newId(), intent.target, activity.id, mode, choice,
+                given = activity.takeIf { intent.standalone }, standalone = intent.standalone) }
+        } else pull(intent.source, activity.id, activity.title, mode, choice)
+    }
 
     /** What this phone could hand over right now, most relevant first. */
     val local: StateFlow<List<Activity>> = localFlow.asStateFlow()
@@ -111,11 +170,21 @@ object HandoffEngine {
             addAction(Intent.ACTION_USER_PRESENT)
         })
         peersWatch = scope.launch { Link.peers.collect { withdrawStaleSuggestion(app, it) } }
+        expiry = scope.launch {
+            while (true) {
+                delay(1_000)
+                history.expire(System.currentTimeMillis()).forEach {
+                    notice(HandoffNotice(it.requestId, it.title, "No confirmation received. ${it.detail}", false, true))
+                }
+            }
+        }
         schedulePublish()
     }
 
     fun stop() {
         val app = appContext ?: return
+        expiry?.cancel()
+        expiry = null
         peersWatch?.cancel()
         peersWatch = null
         runCatching { app.unregisterReceiver(screenReceiver) }
@@ -165,9 +234,10 @@ object HandoffEngine {
     /** Hands over an activity already frozen by the caller, e.g. a player that is about to close. */
     fun send(activity: Activity, targetDeviceId: String = Link.hostId) {
         val requestId = Wire.newId()
-        Link.notice(HandoffNotice(requestId, activity.title, "Sending to your PC…", failed = false, done = false))
+        begin(requestId, activity, Link.deviceId, targetDeviceId, HandoffModes.AUTO, null, standalone = true)
+        notice(HandoffNotice(requestId, activity.title, "Sending to your PC…", failed = false, done = false))
         if (!Link.send(MessageTypes.HANDOFF_DELIVER, HandoffDeliverPayload(requestId, Link.deviceId, targetDeviceId, activity))) {
-            Link.notice(HandoffNotice(requestId, activity.title, "Not connected to your PC.", failed = true, done = true))
+            finish(requestId, HandoffStatus.Failed, "Not connected to your PC.")
         }
     }
 
@@ -194,19 +264,21 @@ object HandoffEngine {
             (known.kind in SPECULATIVE_KINDS || choice?.kind == ChoiceKinds.APP || choice?.kind == ChoiceKinds.WEB)
         val sentMode = if (stream) HandoffModes.STREAM else mode
 
+        begin(requestId, known, sourceDeviceId, Link.deviceId, sentMode, choice, title, activityId = activityId ?: known?.id)
+        val opening = if (speculative && Link.isReady) scope.async {
+            runCatching { Openers.open(context, known!!, choice) }.getOrElse { OpenResult(HandoffStatus.Failed, it.message) }
+        } else null
+        pending[requestId] = Pending(tapped, stream, opening)
+        if (pending.size > 40) pending.entries.sortedByDescending { it.value.tappedAt }.drop(40).forEach { pending.remove(it.key) }
         if (!Link.send(MessageTypes.HANDOFF_PULL, HandoffPullPayload(requestId, sourceDeviceId, Link.deviceId, activityId ?: known?.id, speculative, sentMode, choice))) {
-            Link.notice(HandoffNotice(requestId, title, "Not connected to your PC.", failed = true, done = true))
+            opening?.cancel()
+            pending.remove(requestId)
+            finish(requestId, HandoffStatus.Failed, "Not connected to your PC.")
             return
         }
-        pending[requestId] = Pending(tapped, speculative || stream)
-        Link.notice(HandoffNotice(requestId, title, "Continuing here…", failed = false, done = false))
+        notice(HandoffNotice(requestId, title, "Continuing here…", failed = false, done = false))
         when {
             stream -> Launcher.start(context, StreamViewerActivity.intent(context, requestId, sourceDeviceId, known, tapped), title)
-            speculative -> scope.launch {
-                val result = runCatching { Openers.open(context, known!!, choice) }.getOrElse { OpenResult(HandoffStatus.Failed, it.message) }
-                Log.i(TAG, "Opened '${known!!.title}' speculatively after ${SystemClock.elapsedRealtime() - tapped} ms: ${result.status}")
-                if (result.status == HandoffStatus.Failed) pending[requestId] = Pending(tapped, opened = false)
-            }
         }
     }
 
@@ -231,9 +303,9 @@ object HandoffEngine {
         activity.kind == ActivityKind.WindowStream || (activity.content?.provider == "unknown" && activity.window != null)
 
     /** A pull this phone is waiting on, and whether it already opened the activity. */
-    private data class Pending(val tappedAt: Long, val opened: Boolean)
-
+    private data class Pending(val tappedAt: Long, val streamOpened: Boolean, val opening: Deferred<OpenResult>? = null)
     private val pending = java.util.concurrent.ConcurrentHashMap<String, Pending>()
+    private val opening = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val SPECULATIVE_KINDS = setOf(ActivityKind.AppMedia, ActivityKind.WebMedia, ActivityKind.WebPage)
 
     fun onMessage(envelope: Envelope) {
@@ -246,7 +318,15 @@ object HandoffEngine {
             }
             MessageTypes.HANDOFF_DELIVER -> {
                 val deliver = envelope.read<HandoffDeliverPayload>()
-                if (deliver.targetDeviceId == Link.deviceId) scope.launch { openHere(deliver) }
+                if (deliver.targetDeviceId == Link.deviceId && opening.add(deliver.requestId)) scope.launch {
+                    try { openHere(deliver) }
+                    catch (error: Exception) {
+                        finish(deliver.requestId, HandoffStatus.Failed, error.message ?: "Couldn't open it.")
+                        Link.send(MessageTypes.HANDOFF_RESULT, HandoffResultPayload(deliver.requestId, deliver.sourceDeviceId,
+                            Link.deviceId, HandoffStatus.Failed, error.message))
+                    }
+                    finally { opening.remove(deliver.requestId) }
+                }
             }
             MessageTypes.STREAM_CONTROL -> {
                 val control = envelope.read<StreamControlPayload>()
@@ -263,12 +343,12 @@ object HandoffEngine {
             MessageTypes.HANDOFF_RESULT -> {
                 val result = envelope.read<HandoffResultPayload>()
                 val failed = result.status == HandoffStatus.Failed
-                val text = when (result.status) {
-                    HandoffStatus.Opened -> "Continuing on your PC"
-                    HandoffStatus.Fallback -> result.detail ?: "Continuing on your PC"
-                    HandoffStatus.Failed -> result.detail ?: "Couldn't continue it there."
-                }
-                Link.notice(HandoffNotice(result.requestId, "", text, failed, done = true))
+                val text = result.detail ?: "Couldn't continue it there."
+                val record = history.find(result.requestId) ?: return
+                if (record.intent.source != result.sourceDeviceId || record.intent.target != result.targetDeviceId) return
+                if (record.status != null && !(record.intent.streaming && record.status != HandoffStatus.Failed && failed)) return
+                pending.remove(result.requestId)
+                finish(result.requestId, result.status, result.detail ?: "Destination reported the activity opened.")
                 if (failed) BatonNotifications.result(appContext ?: return, "Couldn't continue", text)
             }
         }
@@ -280,7 +360,8 @@ object HandoffEngine {
         activityId: String?,
         mode: String = HandoffModes.AUTO,
         choice: HandoffChoice? = null,
-        given: Activity? = null
+        given: Activity? = null,
+        standalone: Boolean = false
     ) {
         val context = appContext ?: return
         val list = computeLocal()
@@ -291,7 +372,8 @@ object HandoffEngine {
             }
         if (candidate == null) {
             val text = "Nothing is playing or open on this phone right now."
-            Link.notice(HandoffNotice(requestId, "Nothing to continue", text, failed = true, done = true))
+            begin(requestId, null, Link.deviceId, targetDeviceId, mode, choice, "Nothing to continue", activityId = activityId)
+            finish(requestId, HandoffStatus.Failed, text)
             Link.send(MessageTypes.HANDOFF_RESULT, HandoffResultPayload(requestId, Link.deviceId, targetDeviceId, HandoffStatus.Failed, text))
             return
         }
@@ -306,15 +388,23 @@ object HandoffEngine {
             ChoiceKinds.APP, ChoiceKinds.WEB -> false
             else -> mode == HandoffModes.STREAM || candidate.kind == ActivityKind.WindowStream
         }
-        if (stream) {
-            mirror(context, requestId, targetDeviceId, candidate, chosen)
+        begin(requestId, candidate, Link.deviceId, targetDeviceId, mode, chosen, standalone = standalone)
+        val activity = try {
+            if (stream) {
+                mirror(context, requestId, targetDeviceId, candidate, chosen)
+                return
+            }
+            take(withFullUrl(context, candidate))
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            val detail = error.message ?: "Couldn't obtain a fresh activity snapshot."
+            finish(requestId, HandoffStatus.Failed, detail)
+            Link.send(MessageTypes.HANDOFF_RESULT, HandoffResultPayload(requestId, Link.deviceId, targetDeviceId, HandoffStatus.Failed, detail))
             return
         }
-
-        val activity = take(withFullUrl(context, candidate))
-        Link.notice(HandoffNotice(requestId, activity.title, "Sending to your PC…", failed = false, done = false))
+        notice(HandoffNotice(requestId, activity.title, "Sending to your PC…", failed = false, done = false))
         if (!Link.send(MessageTypes.HANDOFF_DELIVER, HandoffDeliverPayload(requestId, Link.deviceId, targetDeviceId, activity, choice = chosen))) {
-            Link.notice(HandoffNotice(requestId, activity.title, "Not connected to your PC.", failed = true, done = true))
+            finish(requestId, HandoffStatus.Failed, "Not connected to your PC.")
         }
         Log.i(TAG, "Handed ${activity.kind} '${activity.title}' to $targetDeviceId")
         schedulePublish()
@@ -328,8 +418,11 @@ object HandoffEngine {
     private fun mirror(context: Context, requestId: String, targetDeviceId: String, activity: Activity, choice: HandoffChoice? = null) {
         val (width, height) = PhoneMirror.displaySize(context).let { PhoneMirror.encodedSize(it.first, it.second) }
         val offer = StreamOffer(requestId, width, height, activity.title, StreamKinds.PHONE)
-        Link.send(MessageTypes.HANDOFF_DELIVER, HandoffDeliverPayload(requestId, Link.deviceId, targetDeviceId, activity, offer, choice))
-        Link.notice(HandoffNotice(requestId, activity.title, "Showing it on your PC…", failed = false, done = true))
+        if (!Link.send(MessageTypes.HANDOFF_DELIVER, HandoffDeliverPayload(requestId, Link.deviceId, targetDeviceId, activity, offer, choice))) {
+            finish(requestId, HandoffStatus.Failed, "Not connected to your PC.")
+            return
+        }
+        notice(HandoffNotice(requestId, activity.title, "Opening viewer; screen sharing needs consent…", failed = false, done = false))
         PhoneMirror.start(context, requestId, targetDeviceId, activity.title, activity.app.id.takeIf { activity.kind != ActivityKind.LocalMedia })
         Log.i(TAG, "Mirroring '${activity.title}' to $targetDeviceId")
     }
@@ -367,23 +460,35 @@ object HandoffEngine {
     private suspend fun openHere(deliver: HandoffDeliverPayload) {
         val context = appContext ?: return
         val activity = deliver.activity
+        val existing = history.find(deliver.requestId)
+        if (existing != null && (existing.intent.source != deliver.sourceDeviceId || existing.intent.target != deliver.targetDeviceId)) return
+        if (existing?.status != null) {
+            Link.send(MessageTypes.HANDOFF_RESULT, HandoffResultPayload(deliver.requestId, deliver.sourceDeviceId,
+                Link.deviceId, existing.status, existing.detail))
+            return
+        }
+        begin(deliver.requestId, activity, deliver.sourceDeviceId, Link.deviceId,
+            if (deliver.stream == null) HandoffModes.AUTO else HandoffModes.STREAM, deliver.choice)
         val waiting = pending.remove(deliver.requestId)
+        val speculativeResult = waiting?.opening?.await()
         val startedAt = waiting?.tappedAt ?: SystemClock.elapsedRealtime()
         val stream = deliver.stream
         val result = when {
-            stream != null && StreamViewerActivity.openSession == stream.sessionId -> OpenResult(HandoffStatus.Opened)
+            stream != null && StreamViewerActivity.openSession == stream.sessionId -> OpenResult(HandoffStatus.Opened, "Stream viewer opened; waiting for picture.")
             stream != null -> {
                 // The PC streams this window live over the media channel; watching it is how it continues here.
-                Launcher.start(context, StreamViewerActivity.intent(context, stream.sessionId, deliver.sourceDeviceId, activity, startedAt, stream.width, stream.height), activity.title)
-                OpenResult(HandoffStatus.Opened)
+                if (Launcher.start(context, StreamViewerActivity.intent(context, stream.sessionId, deliver.sourceDeviceId, activity, startedAt, stream.width, stream.height), activity.title))
+                    OpenResult(HandoffStatus.Opened, "Stream viewer opened; waiting for picture.")
+                else OpenResult(HandoffStatus.Fallback, "Tap the notification to open the stream viewer; no picture is confirmed yet.")
             }
-            waiting?.opened == true -> {
+            speculativeResult != null && speculativeResult.status != HandoffStatus.Failed -> {
                 // Already open from the peer list: only correct the position if it drifted.
                 reconcileSpeculative(activity)
-                OpenResult(HandoffStatus.Opened)
+                OpenResult(speculativeResult.status, if (speculativeResult.status == HandoffStatus.Opened && activity.playback != null)
+                    "App opened; playback position reconciliation requested, not confirmed." else speculativeResult.detail)
             }
             else -> {
-                Link.notice(HandoffNotice(deliver.requestId, activity.title, "Opening…", failed = false, done = false))
+                notice(HandoffNotice(deliver.requestId, activity.title, "Opening…", failed = false, done = false))
                 runCatching { Openers.open(context, activity, deliver.choice) }.getOrElse { OpenResult(HandoffStatus.Failed, it.message ?: "Couldn't open it.") }
             }
         }
@@ -391,9 +496,7 @@ object HandoffEngine {
         Log.i(TAG, "Continued '${activity.title}' (${result.status}) ${openedMs} ms after the request")
         Link.send(MessageTypes.HANDOFF_RESULT,
             HandoffResultPayload(deliver.requestId, deliver.sourceDeviceId, Link.deviceId, result.status, result.detail, openedMs = openedMs))
-        Link.notice(HandoffNotice(deliver.requestId, activity.title,
-            result.detail ?: if (result.status == HandoffStatus.Failed) "Couldn't open it." else "Continuing here",
-            failed = result.status == HandoffStatus.Failed, done = true))
+        finish(deliver.requestId, result.status, result.detail)
     }
 
     private fun reconcileSpeculative(activity: Activity) {

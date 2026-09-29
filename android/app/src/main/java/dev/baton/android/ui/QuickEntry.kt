@@ -80,7 +80,7 @@ class ShareToPcActivity : Activity() {
             url = if (ContentLinks.youTubeVideoId(url) != null) ContentLinks.withYouTubeTime(url, position) else url,
             playback = session?.let { Playback(position, duration, playing = false, capturedAt = Wire.time()) }
         )
-        Link.send(MessageTypes.HANDOFF_DELIVER, HandoffDeliverPayload(Wire.newId(), Link.deviceId, Link.hostId, activity))
+        HandoffEngine.send(activity)
         Toast.makeText(this, "Continuing on your PC", Toast.LENGTH_SHORT).show()
         finish()
     }

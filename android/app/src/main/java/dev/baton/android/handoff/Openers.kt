@@ -34,8 +34,7 @@ object Openers {
         when (choice?.kind) {
             ChoiceKinds.WEB -> (choice.url ?: activity.url)?.let { url ->
                 val target = if (choice.url == null) ContentLinks.withTextAnchor(url, activity.textAnchor) else url
-                Launcher.start(context, Intent(Intent.ACTION_VIEW, Uri.parse(target)), activity.title)
-                return OpenResult(HandoffStatus.Opened)
+                return launchResult(Launcher.start(context, Intent(Intent.ACTION_VIEW, Uri.parse(target)), activity.title))
             }
             ChoiceKinds.APP -> choice.appId?.let { app ->
                 // The content's own app (or a build of it, like ReVanced) keeps the usual path,
@@ -60,21 +59,19 @@ object Openers {
             }
             val view = Intent(Intent.ACTION_VIEW, Uri.parse(target)).setPackage(app)
             if (view.resolveActivity(context.packageManager) != null) {
-                launch(context, view, activity, app, positionMs.takeIf { activity.playback != null })
-                return OpenResult(HandoffStatus.Opened)
+                return launchResult(launch(context, view, activity, app, positionMs.takeIf { activity.playback != null }))
             }
         }
         val launch = context.packageManager.getLaunchIntentForPackage(app)
             ?: return OpenResult(HandoffStatus.Failed, "$label isn't installed on this phone.")
-        Launcher.start(context, launch, activity.title)
+        if (!Launcher.start(context, launch, activity.title)) return launchResult(false)
         return if (url != null) OpenResult(HandoffStatus.Fallback, "Opened $label; it can't be given the page itself.") else OpenResult(HandoffStatus.Opened)
     }
 
     suspend fun open(context: Context, activity: Activity, pinned: String? = null): OpenResult {
         if (activity.kind == ActivityKind.LocalMedia && activity.file != null) {
             // The file stays on the PC; Baton's player streams it from there.
-            Launcher.start(context, PlayerActivity.intent(context, activity), activity.title)
-            return OpenResult(HandoffStatus.Opened)
+            return launchResult(Launcher.start(context, PlayerActivity.intent(context, activity), activity.title))
         }
         if (activity.kind == ActivityKind.LocalMedia || activity.kind == ActivityKind.WindowStream) {
             return OpenResult(HandoffStatus.Failed, "This can only be continued as a stream, and the PC didn't offer one.")
@@ -118,8 +115,7 @@ object Openers {
         // Also for YouTube links with a time: an app already showing that video (paused) only
         // moves there and stays paused, so the session is made to play at the right second.
         // Live streams have no second to move to.
-        launch(context, intent, activity, appPackage, positionMs.takeIf { activity.playback?.durationMs?.let { it > 0 } == true })
-        return OpenResult(HandoffStatus.Opened)
+        return launchResult(launch(context, intent, activity, appPackage, positionMs.takeIf { activity.playback?.durationMs?.let { it > 0 } == true }))
     }
 
     private suspend fun openYouTube(context: Context, activity: Activity, provider: String, positionMs: Long, pinned: String? = null): OpenResult {
@@ -133,16 +129,16 @@ object Openers {
                 OpenResult(HandoffStatus.Failed, "Baton can't find ${activity.title} on this phone. ${activity.app.name} isn't available here.")
             } else {
                 val search = Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(activity.title))
-                Launcher.start(context, Intent(Intent.ACTION_VIEW, search), activity.title)
-                OpenResult(HandoffStatus.Fallback, "Couldn't find the exact video, so Baton opened a search.")
+                if (Launcher.start(context, Intent(Intent.ACTION_VIEW, search), activity.title))
+                    OpenResult(HandoffStatus.Fallback, "Couldn't find the exact video, so Baton opened a search.")
+                else launchResult(false)
             }
         }
 
         val appPackage = installedPackage(context, KnownApps.fromProvider(if (music) "youtubemusic" else "youtube")!!, pinned)
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(ContentLinks.youTubeWatch(id, positionMs, music)))
         if (isUsable(context, appPackage)) intent.setPackage(appPackage)
-        launch(context, intent, activity, appPackage, positionMs.takeIf { activity.playback != null })
-        return OpenResult(HandoffStatus.Opened)
+        return launchResult(launch(context, intent, activity, appPackage, positionMs.takeIf { activity.playback != null }))
     }
 
     private fun openMusic(context: Context, activity: Activity, app: KnownApp, query: String, positionMs: Long, uri: String?, pinned: String? = null): OpenResult {
@@ -156,8 +152,7 @@ object Openers {
         } else {
             playFromSearch(query, activity.title, activity.subtitle).setPackage(appPackage)
         }
-        launch(context, intent, activity, appPackage, positionMs)
-        return OpenResult(HandoffStatus.Opened)
+        return launchResult(launch(context, intent, activity, appPackage, positionMs))
     }
 
     /**
@@ -170,22 +165,26 @@ object Openers {
             return OpenResult(HandoffStatus.Failed, "Stremio isn't installed on this phone. Choose \"Stream the window\" instead.")
         }
         val link = if (id != null) "stremio:///detail/$id" else "stremio:///search?search=" + Uri.encode(activity.title)
-        Launcher.start(context, Intent(Intent.ACTION_VIEW, Uri.parse(link)).setPackage(app.androidPackage), activity.title)
+        if (!Launcher.start(context, Intent(Intent.ACTION_VIEW, Uri.parse(link)).setPackage(app.androidPackage), activity.title)) return launchResult(false)
         return OpenResult(HandoffStatus.Fallback, "Opened ${activity.title} in Stremio: it continues where your account says you stopped.")
     }
 
     private fun openVideoService(context: Context, activity: Activity, app: KnownApp): OpenResult {
         val launch = context.packageManager.getLaunchIntentForPackage(app.androidPackage)
             ?: return OpenResult(HandoffStatus.Failed, "${app.displayName} isn't installed on this phone.")
-        Launcher.start(context, launch, activity.title)
+        if (!Launcher.start(context, launch, activity.title)) return launchResult(false)
         return OpenResult(HandoffStatus.Fallback,
             "Opened ${app.displayName}. Pick ${activity.title} and press Resume: ${app.displayName} remembers where you stopped.")
     }
 
     /** Starts the intent, then (when [positionMs] is set) moves the resulting session there. */
-    private fun launch(context: Context, intent: Intent, activity: Activity, appPackage: String?, positionMs: Long?) {
-        Launcher.start(context, intent, activity.title)
-        if (positionMs == null) return
+    internal fun launchResult(started: Boolean) = if (started) OpenResult(HandoffStatus.Opened,
+        "App opened; playback and exact position are not confirmed.")
+        else OpenResult(HandoffStatus.Fallback, "Tap the notification on this phone to continue; the app hasn't opened yet.")
+
+    private fun launch(context: Context, intent: Intent, activity: Activity, appPackage: String?, positionMs: Long?): Boolean {
+        if (!Launcher.start(context, intent, activity.title)) return false
+        if (positionMs == null) return true
         reconcileScope.launch {
             MediaSessions.reconcile(
                 // By title: the app may still hold the video it showed before this one loads.
@@ -197,6 +196,7 @@ object Openers {
                 play = true
             )
         }
+        return true
     }
 
     private fun playFromSearch(query: String, title: String?, artist: String?): Intent =

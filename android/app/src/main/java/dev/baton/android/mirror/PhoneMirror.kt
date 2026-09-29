@@ -167,6 +167,7 @@ class MirrorConsentActivity : Activity() {
             PhoneMirror.log("Screen sharing declined")
             PhoneMirror.sendMeta("end", reason = "Screen sharing was declined on the phone.")
             PhoneMirror.sessionId?.let {
+                dev.baton.android.handoff.HandoffEngine.fail(it, "Screen sharing was declined on the phone.")
                 Link.send(MessageTypes.HANDOFF_RESULT, HandoffResultPayload(it, Link.deviceId, PhoneMirror.targetDeviceId,
                     HandoffStatus.Failed, "Screen sharing was declined on the phone."))
             }
@@ -344,6 +345,7 @@ class MirrorService : Service() {
     private fun declined(id: String, reason: String) {
         PhoneMirror.sendMeta("end", reason = reason, session = id)
         Link.send(MessageTypes.HANDOFF_RESULT, HandoffResultPayload(id, Link.deviceId, PhoneMirror.targetDeviceId, HandoffStatus.Failed, reason))
+        dev.baton.android.handoff.HandoffEngine.fail(id, reason)
         PhoneMirror.ended(id)
     }
 

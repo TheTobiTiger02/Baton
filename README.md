@@ -83,6 +83,20 @@ Cards for media on the other device have play/pause, ±10 s, a seek bar and the 
 PC's playback also appears in Android's media controls (notification shade, lock screen, headset
 buttons), and the PC's Baton window can play, pause and skip what the phone is playing.
 
+### Recent handoffs and recovery
+
+Expand **Recent handoffs** on the PC or phone to see the latest 40 transfers in this app session,
+including their destination and result. **Retry** uses the original activity and app choice;
+**Stream instead** is available when the original activity can be streamed. Both devices must be
+connected and the activity must still exist. **Clear history** removes the list, and restarting
+the app starts an empty session; titles and links are not saved to a history file.
+
+**No confirmation received** means the destination did not report back within two minutes; the
+activity may already have opened. Retrying asks you to confirm that possibility. A late result
+updates the same entry. Opening a stream viewer does not confirm that its picture is playing.
+The updated browser popup waits for the destination result and keeps failures visible for retry;
+with older PC builds it explains that confirmed status is unavailable.
+
 ## Using it
 
 **PC.** Baton lives in the notification area. Click its icon for the quick panel. Shortcuts:
@@ -121,8 +135,9 @@ The APK is signed with the key in the repository secrets `ANDROID_KEYSTORE_BASE6
 `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` (locally:
 `android/keystore.properties`, never committed). Keep that key: phones only accept updates signed
 with the same one. `scripts/Release.ps1 -Version 1.2.3 [-NoPublish]` does the same by hand
-(needs `dotnet tool install -g vpk`). The Zen/Firefox extension is not part of releases, since each
-build carries its PC's private browser token.
+(needs `dotnet tool install -g vpk`). When `AMO_JWT_ISSUER` and `AMO_JWT_SECRET` are configured,
+the release also includes the signed Zen/Firefox extension and its update manifest. Release
+extensions obtain approval from Baton; development builds carry the local PC's browser token.
 
 ## Setup from source
 

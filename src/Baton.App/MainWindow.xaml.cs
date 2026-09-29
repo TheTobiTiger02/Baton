@@ -32,6 +32,46 @@ public partial class MainWindow : Window
         UpdateExtensionStatus();
         services.Runtime.Apps.PreferencesChanged += () => Dispatcher.BeginInvoke(UpdateAppChoices);
         UpdateAppChoices();
+        services.Coordinator.History.Changed += () => Dispatcher.BeginInvoke(UpdateHistory);
+        services.Coordinator.DevicesChanged += () => Dispatcher.BeginInvoke(UpdateHistory);
+        UpdateHistory();
+    }
+
+    private void UpdateHistory()
+    {
+        string Name(string id) => _services.Coordinator.GetDevices().FirstOrDefault(d => d.DeviceId == id)?.Name ?? "Unavailable device";
+        var items = _services.Coordinator.History.Recent.Select(record =>
+        {
+            var recovery = _services.Coordinator.Recovery(record);
+            var couldStream = record.Intent is { } intent && (intent.SourceDeviceId != _services.Coordinator.LocalDeviceId ||
+                intent.Activity is { } activity && Baton.Host.Handoff.HandoffCoordinator.CanStream(activity));
+            return new
+            {
+                Record = record, Title = record.Event.Title,
+                Route = $"{record.StartedAt.ToLocalTime():t} · {Name(record.Event.SourceDeviceId)} → {Name(record.Event.TargetDeviceId)}",
+                record.Outcome, record.Event.Detail,
+                Reason = record.Recoverable || record.Event.Status == Baton.Protocol.HandoffStatus.Fallback ? recovery.Reason : null,
+                ShowRetry = record.Recoverable, CanRetry = recovery.Retry, CanStream = recovery.Stream,
+                ShowStream = couldStream && (record.Recoverable || record.Event.Status == Baton.Protocol.HandoffStatus.Fallback)
+            };
+        }).ToArray();
+        HandoffHistoryList.ItemsSource = items;
+        HistoryEmpty.Visibility = items.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void ClearHistory_Click(object sender, RoutedEventArgs e) => _services.Coordinator.History.Clear();
+    private async void RetryHistory_Click(object sender, RoutedEventArgs e) => await RecoverHistoryAsync(sender, false);
+    private async void StreamHistory_Click(object sender, RoutedEventArgs e) => await RecoverHistoryAsync(sender, true);
+
+    private async Task RecoverHistoryAsync(object sender, bool stream)
+    {
+        if (sender is not FrameworkElement { Tag: Baton.Host.Handoff.HandoffRecord record }) return;
+        if (record.Event.Unconfirmed && MessageBox.Show(this,
+            "The destination hasn't confirmed this transfer. The activity may already have opened. Try again?",
+            "Retry handoff", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        try { await _services.Coordinator.RecoverAsync(record.Event.RequestId, stream); }
+        catch (Exception ex) { _services.Host.Diagnostics.Record(Baton.Host.DiagnosticsCategory.Handoff, "recovery.failed", ex.Message); }
+        UpdateHistory();
     }
 
     public void ShowSettings() => NavSettings.IsChecked = true;

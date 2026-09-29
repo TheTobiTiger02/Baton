@@ -57,7 +57,26 @@ public sealed class BatonRuntime : IAsyncDisposable
         };
         Browser.SendRequested += (activityId, target) => _ = Coordinator.SendAsync(target, activityId);
         Browser.SendUrlRequested += (activity, target) => _ = Coordinator.SendActivityAsync(target, activity);
+        Browser.FindHandoff = Coordinator.History.Find;
+        Browser.CorrelatedSendRequested += request => _ = SendBrowserAsync(request);
+        Browser.CorrelatedRetryRequested += (previous, requestId) => _ = RetryBrowserAsync(previous, requestId);
+        Coordinator.HandoffUpdated += Browser.PublishHandoff;
         Coordinator.DevicesChanged += PublishDevicesToBrowsers;
+    }
+
+    private async Task SendBrowserAsync(BrowserSendRequest request)
+    {
+        try
+        {
+            if (request.Activity is { } activity) await Coordinator.SendActivityAsync(request.TargetDeviceId, activity, requestId: request.RequestId);
+            else await Coordinator.SendAsync(request.TargetDeviceId, request.ActivityId, requestId: request.RequestId);
+        }
+        catch (Exception ex) { Coordinator.FailRequest(request.RequestId, ex.Message); }
+    }
+
+    private async Task RetryBrowserAsync(string previous, string requestId)
+    {
+        await Coordinator.RecoverAsync(previous, newRequestId: requestId);
     }
 
     /// <summary>The phone sends go to first (the app's default), for the browsers' menus.</summary>
@@ -103,6 +122,7 @@ public sealed class BatonRuntime : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        Coordinator.Dispose();
         Presence.Dispose();
         Windows.Dispose();
         Media.Dispose();

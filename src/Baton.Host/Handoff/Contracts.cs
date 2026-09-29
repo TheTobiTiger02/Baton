@@ -50,7 +50,8 @@ public sealed record HandoffEvent(
     string TargetDeviceId,
     string Title,
     HandoffStatus? Status,
-    string? Detail);
+    string? Detail,
+    bool Unconfirmed = false);
 
 /// <summary>A source whose activities can be played, paused, seeked and turned up or down remotely.</summary>
 public interface IActivityControl

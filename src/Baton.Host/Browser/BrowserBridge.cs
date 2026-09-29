@@ -33,6 +33,18 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
     private readonly ConcurrentDictionary<string, TaskCompletionSource<TabState?>> _takes = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _resumes = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string?> _artwork = new(StringComparer.Ordinal);
+    private readonly BrowserHandoffRequests _handoffs = new();
+    public event Action<BrowserSendRequest>? CorrelatedSendRequested;
+    public Func<string, HandoffRecord?>? FindHandoff { get; set; }
+    public event Action<string, string>? CorrelatedRetryRequested;
+    public void PublishHandoff(HandoffEvent value)
+    {
+        if (_handoffs.Find(value.RequestId) is not { } route || !_connections.TryGetValue(route.ConnectionId, out var connection) || !connection.Proven) return;
+        _ = SendAsync(connection, new { type = "handoffStatus", requestId = route.ClientId,
+            status = value.Unconfirmed ? "unconfirmed" : value.Status?.ToString().ToLowerInvariant() ?? "pending",
+            detail = value.Detail, title = value.Title });
+    }
+
     private IReadOnlyList<BridgeDevice> _devices = [];
 
     /// <summary>
@@ -178,7 +190,7 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
 
                     OnMessage(connection, message);
                 }
-                catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
+                catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException)
                 {
                     diagnostics.Record(DiagnosticsCategory.Media, "browser.message.bad", ex.Message, severity: DiagnosticsSeverity.Warning);
                 }
@@ -190,6 +202,7 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
         finally
         {
             _connections.TryRemove(connection.Id, out _);
+            _handoffs.Remove(connection.Id);
             diagnostics.Record(DiagnosticsCategory.Media, "browser.disconnected", connection.Browser);
             Changed?.Invoke();
         }
@@ -345,7 +358,8 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
         }
         catch (TimeoutException)
         {
-            return connection.Tabs.FirstOrDefault(tab => tab.TabId == tabId) is { } known ? ToActivity(connection, known) : null;
+            // A cached tab is not a fresh snapshot and may now contain another activity.
+            return null;
         }
         finally
         {
@@ -395,6 +409,7 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
                 NameFromHello(connection, message);
                 connection.ConfirmsResume = message.TryGetProperty("version", out var version)
                     && Version.TryParse(version.GetString(), out var parsed) && parsed >= new Version(0, 1, 2);
+                _ = SendAsync(connection, new { type = "capabilities", handoffStatus = true });
                 diagnostics.Record(DiagnosticsCategory.Media, "browser.connected", connection.Browser);
                 break;
             case "tabs":
@@ -430,8 +445,33 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
                 break;
             }
             case "send":
+                if (message.TryGetProperty("requestId", out var correlation))
+                {
+                    var requestId = _handoffs.Add(connection.Id, correlation.GetString()!);
+                    CorrelatedSendRequested?.Invoke(new BrowserSendRequest(requestId, message.GetProperty("targetDeviceId").GetString()!,
+                        $"tab:{connection.Id}:{message.GetProperty("tabId").GetInt32()}", null));
+                    break;
+                }
                 SendRequested?.Invoke($"tab:{connection.Id}:{message.GetProperty("tabId").GetInt32()}", message.GetProperty("targetDeviceId").GetString()!);
                 break;
+            case "handoffQuery":
+                if (_handoffs.HostId(connection.Id, message.GetProperty("requestId").GetString()!) is { } queried && FindHandoff?.Invoke(queried) is { } record)
+                    PublishHandoff(record.Event);
+                break;
+            case "handoffRetry":
+            {
+                var clientId = message.GetProperty("requestId").GetString()!;
+                if (_handoffs.HostId(connection.Id, message.GetProperty("previousRequestId").GetString()!) is { } previous &&
+                    FindHandoff?.Invoke(previous)?.Intent is not null)
+                {
+                    var requestId = _handoffs.Add(connection.Id, clientId);
+                    CorrelatedRetryRequested?.Invoke(previous, requestId);
+                }
+                else if (Guid.TryParse(clientId, out _))
+                    _ = SendAsync(connection, new { type = "handoffStatus", requestId = clientId, status = "failed",
+                        detail = "The original handoff is no longer available. Continue the original activity again from Baton." });
+                break;
+            }
             case "log":
                 diagnostics.Record(DiagnosticsCategory.Media, "browser.log", message.GetProperty("text").GetString(), connection.Browser);
                 break;
@@ -440,7 +480,12 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
                 var url = message.GetProperty("url").GetString()!;
                 var activity = new Activity($"link:{Guid.NewGuid():N}", string.Empty, ActivityKind.WebPage, url,
                     new ActivityApp(connection.Browser, connection.Browser.ToLowerInvariant()), DateTimeOffset.UtcNow, Url: url);
-                SendUrlRequested?.Invoke(activity, message.GetProperty("targetDeviceId").GetString()!);
+                if (message.TryGetProperty("requestId", out var linkCorrelation))
+                {
+                    var requestId = _handoffs.Add(connection.Id, linkCorrelation.GetString()!);
+                    CorrelatedSendRequested?.Invoke(new BrowserSendRequest(requestId, message.GetProperty("targetDeviceId").GetString()!, null, activity));
+                }
+                else SendUrlRequested?.Invoke(activity, message.GetProperty("targetDeviceId").GetString()!);
                 break;
             }
         }
