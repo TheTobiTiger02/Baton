@@ -37,6 +37,8 @@ public sealed class BatonHost : IAsyncDisposable
         Timeline = new HandoffTimeline(Diagnostics);
         MediaChannels = new MediaChannelHub(StreamTickets, Diagnostics);
         WindowStreams = new WindowStreamService(MediaChannels, Diagnostics, Timeline);
+        WindowStreams.MutedAppsPath = Path.Combine(StorageDirectory, "muted-apps.json");
+        WindowStreams.RestoreMutedApps();
         StreamListener.ConnectionAccepted += (connection, cancellation) => connection.Kind == StreamKind.Media
             ? MediaChannels.AcceptAsync(connection, cancellation)
             : connection.DisposeAsync().AsTask();

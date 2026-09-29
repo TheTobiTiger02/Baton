@@ -64,6 +64,69 @@ public sealed class WindowStreamService : IDisposable
     /// <summary>A stream to a phone (device id) started (true) or ended (false), with the window's title. Any thread.</summary>
     public event Action<string, string, bool>? SessionChanged;
 
+    private readonly object _mutedGate = new();
+
+    /// <summary>
+    /// Where apps turned down for a stream are noted (with their volume), so that after a crash
+    /// the next start gives them their sound back. Set by the host.
+    /// </summary>
+    public string? MutedAppsPath { get; set; }
+
+    /// <summary>Notes (volume) or forgets (null) an app turned down while its sound plays on a phone.</summary>
+    private void RememberMuted(string process, double? volume)
+    {
+        if (MutedAppsPath is null)
+        {
+            return;
+        }
+
+        lock (_mutedGate)
+        {
+            try
+            {
+                var muted = File.Exists(MutedAppsPath)
+                    ? JsonSerializer.Deserialize<Dictionary<string, double>>(File.ReadAllText(MutedAppsPath)) ?? []
+                    : [];
+                if (volume is null)
+                {
+                    muted.Remove(process);
+                }
+                else
+                {
+                    muted[process] = volume.Value > 0 ? volume.Value : 1;
+                }
+
+                File.WriteAllText(MutedAppsPath, JsonSerializer.Serialize(muted));
+            }
+            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+            {
+                // Only the crash case needs it.
+            }
+        }
+    }
+
+    /// <summary>Gives apps a stream left turned down (Baton stopped mid-stream) their sound back.</summary>
+    public void RestoreMutedApps()
+    {
+        if (MutedAppsPath is null || !File.Exists(MutedAppsPath))
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var (process, volume) in JsonSerializer.Deserialize<Dictionary<string, double>>(File.ReadAllText(MutedAppsPath)) ?? [])
+            {
+                AppVolume.Set(process, volume);
+            }
+
+            File.Delete(MutedAppsPath);
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+        }
+    }
+
     /// <summary>Send the window's sound along with its picture; read when each stream starts.</summary>
     public bool StreamAudio { get; set; } = true;
 
@@ -298,6 +361,8 @@ public sealed class WindowStreamService : IDisposable
         private int _width = width, _height = height;
         private (int Width, int Height) _full = (width, height);
         private TimeSpan _lastProbe;
+        private string? _mutedProcess;
+        private double? _restoreVolume;
         private static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan SlowRoundTrip = TimeSpan.FromMilliseconds(300);
         private int _stopped;
@@ -379,6 +444,16 @@ public sealed class WindowStreamService : IDisposable
                 _audio.Captured += (pcm, count) =>
                     owner._channels.Send(deviceId, StreamChannel.Audio, StreamRecordFlags.None, (long)_clock.Elapsed.TotalMicroseconds, pcm[..count]);
                 _audio.Start();
+
+                // The sound continues on the phone only. The capture takes the app's audio before
+                // the mixer's volume, so turning the app down here doesn't quiet the phone.
+                if (DesktopWindows.Describe(window)?.ProcessName is { } process)
+                {
+                    _mutedProcess = process;
+                    _restoreVolume = AppVolume.Get(process);
+                    owner.RememberMuted(process, _restoreVolume);
+                    AppVolume.Set(process, 0);
+                }
             }
             catch (Exception ex)
             {
@@ -678,6 +753,13 @@ public sealed class WindowStreamService : IDisposable
                 _idleRefresh?.Dispose();
                 _capture?.Dispose();
                 _audio?.Dispose();
+                if (_mutedProcess is { } muted)
+                {
+                    // Back on the PC: its sound comes back at the level it had.
+                    AppVolume.Set(muted, _restoreVolume is > 0 ? _restoreVolume.Value : 1);
+                    owner.RememberMuted(muted, null);
+                    _mutedProcess = null;
+                }
                 _touch.Dispose();
                 _keepAwake?.Dispose();
                 if (_pipeline is { } pipeline && ReferenceEquals(pipeline.Sink, this))

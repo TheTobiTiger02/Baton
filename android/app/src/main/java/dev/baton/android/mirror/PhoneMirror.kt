@@ -198,6 +198,7 @@ class MirrorService : Service() {
     private var display: VirtualDisplay? = null
     private var codec: MediaCodec? = null
     private val bitrate = MirrorBitrate()
+    private var mutedAudio = false
     private var drain: Thread? = null
     private var audio: Thread? = null
     private var awake: View? = null
@@ -297,6 +298,14 @@ class MirrorService : Service() {
         MediaChannel.controlSink = null
         stopVideo()
         audio?.join(200)
+        if (mutedAudio) {
+            // Back to the phone: its sound too.
+            runCatching {
+                getSystemService(android.media.AudioManager::class.java)
+                    ?.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_UNMUTE, 0)
+            }
+            mutedAudio = false
+        }
         audio = null
         awake?.let { runCatching { getSystemService(WindowManager::class.java).removeView(it) } }
         awake = null
@@ -467,6 +476,12 @@ class MirrorService : Service() {
                 .setBufferSizeInBytes(CHUNK_BYTES * 8)
                 .build()
         }.getOrNull() ?: return
+        // The sound continues on the PC only. Playback capture takes it before the volume, so
+        // muting the phone's media stream doesn't quiet the PC.
+        getSystemService(android.media.AudioManager::class.java)?.let { manager ->
+            runCatching { manager.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_MUTE, 0) }
+            mutedAudio = true
+        }
         audio = Thread({
             val chunk = ByteArray(CHUNK_BYTES)
             try {
