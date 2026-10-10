@@ -191,6 +191,56 @@ public class HandoffReliabilityTests
     }
 
     [Fact]
+    public async Task BrowserContinuationWaitsForFreshSnapshotAndDuplicateDeliveriesOpenOnce()
+    {
+        var opener = new DeferredOpener();
+        await using var f = new Fixture(opener);
+        var phone = f.Pair("phone");
+        var source = f.Source.Current[0];
+        f.Coordinator.CaptureBrowserReturnTarget = _ => new BrowserReturnTarget(Guid.NewGuid().ToString(), 7, source.Url!);
+        await f.Coordinator.SendAsync(phone, source.Id);
+        var sent = f.Coordinator.History.Recent[0];
+        Assert.Equal(sent.Event.RequestId, sent.Intent!.Activity!.ContinuationId);
+        await f.Host.DispatchAsync(phone, Envelope.Create(MessageTypes.HandoffResult, phone,
+            new HandoffResultPayload(sent.Event.RequestId, f.Coordinator.LocalDeviceId, phone, HandoffStatus.Opened)));
+        var known = source with { DeviceId = "spoofed", ContinuationId = sent.Event.RequestId };
+        await f.Host.DispatchAsync(phone, Envelope.Create(MessageTypes.ActivityList, phone, new ActivityListPayload([known], PresenceState.Active)));
+        await f.Coordinator.PullAsync(phone, known.Id);
+        var id = f.Coordinator.History.Recent[0].Event.RequestId;
+        Assert.Equal(0, opener.Calls);
+        var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        f.Coordinator.History.Changed += () => { if (f.Coordinator.History.Find(id)?.Event.Status is not null) completed.TrySetResult(); };
+        var fresh = known with { Url = "https://example.com/new-content" };
+        for (var i = 0; i < 2; i++) await f.Host.DispatchAsync(phone, Envelope.Create(MessageTypes.HandoffDeliver, phone,
+            new HandoffDeliverPayload(id, phone, f.Coordinator.LocalDeviceId, fresh)));
+        Assert.Equal(1, opener.Calls);
+        Assert.Equal(phone, opener.Activity!.DeviceId);
+        Assert.Equal(fresh.Url, opener.Activity.Url);
+        Assert.Equal(sent.Event.RequestId, opener.Activity.ContinuationId);
+        opener.Result.SetResult(OpenResult.Fallback("Returned; player unavailable"));
+        await completed.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal(1, opener.Calls);
+    }
+
+    [Fact]
+    public async Task AnotherPhoneCannotCarryContinuationThroughCoordinator()
+    {
+        var opener = new DeferredOpener();
+        await using var f = new Fixture(opener);
+        var phone = f.Pair("phone"); var other = f.Pair("other");
+        var source = f.Source.Current[0];
+        f.Coordinator.History.Observe(new HandoffEvent("origin", "pc", phone, "Page", HandoffStatus.Opened, null),
+            new HandoffIntent("pc", phone, source.Id, HandoffModes.Auto, null, source,
+                ReturnTab: new BrowserReturnTarget(Guid.NewGuid().ToString(), 7, source.Url!)));
+        await f.Host.DispatchAsync(other, Envelope.Create(MessageTypes.HandoffDeliver, other,
+            new HandoffDeliverPayload("return", other, f.Coordinator.LocalDeviceId,
+                source with { DeviceId = phone, ContinuationId = "origin" })));
+        Assert.Equal(other, opener.Activity!.DeviceId);
+        Assert.Null(opener.Activity.ContinuationId);
+        opener.Result.SetResult(OpenResult.Opened());
+    }
+
+    [Fact]
     public async Task ActivityDisappearingDuringFreshSnapshotFailsWithoutSendingCachedActivity()
     {
         await using var f = new Fixture();
@@ -254,8 +304,9 @@ public class HandoffReliabilityTests
     private sealed class DeferredOpener : IActivityOpener
     {
         public int Calls;
+        public Activity? Activity;
         public TaskCompletionSource<OpenResult?> Result { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public Task<OpenResult?> TryOpenAsync(Activity activity, CancellationToken cancellationToken) { Calls++; return Result.Task; }
+        public Task<OpenResult?> TryOpenAsync(Activity activity, CancellationToken cancellationToken) { Calls++; Activity = activity; return Result.Task; }
     }
 
     private sealed class Socket : WebSocket

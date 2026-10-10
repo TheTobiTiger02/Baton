@@ -78,7 +78,37 @@ public static partial class ContentLinks
 
     /// <summary>A Twitch channel's page, when the name is one (letters, digits, underscore).</summary>
     public static string? TwitchChannel(string? name) =>
-        name is { Length: >= 3 and <= 25 } && name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_') ? $"https://www.twitch.tv/{name}" : null;
+        name is { Length: >= 3 and <= 25 } && name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_')
+        && !TwitchPages.Contains(name.ToLowerInvariant()) ? $"https://www.twitch.tv/{name.ToLowerInvariant()}" : null;
+
+    private static readonly HashSet<string> TwitchPages = ["directory", "search", "videos", "settings", "downloads", "subscriptions", "inventory", "login", "signup", "wallet", "drops"];
+
+    public static string? TwitchUrl(string? value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)) return null;
+        var parts = uri.AbsolutePath.Trim('/').Split('/');
+        if (uri.Scheme == "twitch")
+            return uri.Host switch
+            {
+                "stream" or "channel" when parts.Length == 1 => TwitchChannel(parts[0]),
+                "video" or "videos" when parts.Length == 1 && parts[0].Length > 0 && parts[0].All(char.IsAsciiDigit) => $"https://www.twitch.tv/videos/{parts[0]}",
+                _ => null
+            };
+        if (uri.Scheme is not ("http" or "https") || !uri.IsDefaultPort || uri.Host is not ("twitch.tv" or "www.twitch.tv" or "m.twitch.tv")) return null;
+        if (parts.Length == 1) return TwitchChannel(parts[0]);
+        return parts.Length == 2 && parts[0] == "videos" && parts[1].Length > 0 && parts[1].All(char.IsAsciiDigit)
+            ? $"https://www.twitch.tv/videos/{parts[1]}" : null;
+    }
+
+    public static bool IsTwitchLive(string url) => TwitchUrl(url) is { } target && !new Uri(target).AbsolutePath.StartsWith("/videos/", StringComparison.Ordinal);
+
+    public static string WithTwitchTime(string url, long positionMs)
+    {
+        var target = TwitchUrl(url);
+        if (target is null || !new Uri(target).AbsolutePath.StartsWith("/videos/", StringComparison.Ordinal)) return url;
+        var seconds = Math.Max(0, positionMs / 1000);
+        return $"{target}?t={seconds / 3600}h{seconds / 60 % 60}m{seconds % 60}s";
+    }
 
     public static string? SearchUrl(string provider, string query)
     {

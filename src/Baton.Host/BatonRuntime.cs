@@ -45,7 +45,8 @@ public sealed class BatonRuntime : IAsyncDisposable
                 : null,
             // Both ways, whichever the activity came from: pausing an already paused player is harmless.
             PauseElsewhere = async activity => await Browser.PauseMatchingAsync(activity.Title) | await Media.PauseMatchingAsync(activity.Title),
-            OpenInBrowser = (activity, browser) => mediaOpener.TryOpenAsync(activity, browser, CancellationToken.None)
+            OpenInBrowser = (activity, browser) => mediaOpener.TryOpenAsync(activity, browser, CancellationToken.None),
+            CaptureBrowserReturnTarget = Browser.CaptureReturnTarget
         };
         Presence.Changed += Coordinator.SetLocalPresence;
         Presence.Returned += away =>
@@ -58,6 +59,7 @@ public sealed class BatonRuntime : IAsyncDisposable
         Browser.SendRequested += (activityId, target) => _ = Coordinator.SendAsync(target, activityId);
         Browser.SendUrlRequested += (activity, target) => _ = Coordinator.SendActivityAsync(target, activity);
         Browser.FindHandoff = Coordinator.History.Find;
+        Browser.ReturnTabUpdated = Coordinator.History.UpdateReturnTab;
         Browser.CorrelatedSendRequested += request => _ = SendBrowserAsync(request);
         Browser.CorrelatedRetryRequested += (previous, requestId) => _ = RetryBrowserAsync(previous, requestId);
         Coordinator.HandoffUpdated += Browser.PublishHandoff;
@@ -93,8 +95,11 @@ public sealed class BatonRuntime : IAsyncDisposable
     }
 
     /// <summary>Something coming back continues in the tab or app that still has it, when one does.</summary>
-    private async Task<bool> ResumeExistingAsync(Activity activity, long positionMs) =>
-        await Browser.TryResumeAsync(activity, positionMs) || await Media.TryResumeAsync(activity, positionMs);
+    private async Task<OpenResult?> ResumeExistingAsync(Activity activity, long positionMs, string? browserExe) =>
+        await Browser.TryResumeAsync(activity, positionMs, browserExe)
+        ?? (browserExe is null && activity.ContinuationId is null && activity.Playback is not null
+            && !ContentLinks.IsTwitchLive(activity.Url ?? "")
+            && await Media.TryResumeAsync(activity, positionMs) ? OpenResult.Opened("Continued where it was on this PC") : null);
 
     public BatonHost Host { get; }
     public MediaSessionSource Media { get; }

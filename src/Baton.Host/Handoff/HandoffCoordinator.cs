@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Baton.Host.Apps;
+using Baton.Host.Browser;
 using Baton.Media;
 using Baton.Protocol;
 
@@ -163,7 +164,9 @@ public sealed class HandoffCoordinator : IDisposable
     /// does (continuing the tab that still has it, else a link with its time, then a seek):
     /// (activity, browser program). Null when it can't handle the activity. Set by the runtime.
     /// </summary>
-    public Func<Activity, string, Task<OpenResult?>>? OpenInBrowser { get; set; }
+    public Func<Activity, string?, Task<OpenResult?>>? OpenInBrowser { get; set; }
+
+    public Func<Activity, BrowserReturnTarget?>? CaptureBrowserReturnTarget { get; set; }
 
     /// <summary>
     /// Activities that continue as a stream of their window rather than by reopening the content:
@@ -308,7 +311,7 @@ public sealed class HandoffCoordinator : IDisposable
 
         // Opens here at once from what is known: the content (corrected when the exact position
         // arrives), or the app the user picked, which needs nothing from the phone at all.
-        var speculative = target == LocalDeviceId && known is not null && !Streams(choice, mode, known);
+        var speculative = target == LocalDeviceId && known is not null && known.ContinuationId is null && !Streams(choice, mode, known);
         var request = new HandoffPullPayload(requestId ?? NewRequestId(), sourceDeviceId, target, activityId ?? known?.Id, speculative, mode, choice);
         _host.Timeline.Mark(request.RequestId, "pull");
         Track(new HandoffEvent(request.RequestId, sourceDeviceId, target, known?.Title ?? "Activity", null, "Asking the phone…"),
@@ -438,6 +441,13 @@ public sealed class HandoffCoordinator : IDisposable
     /// <summary>Sends a ready activity, with a stream of its window when that is how it continues.</summary>
     private async Task DeliverAsync(string requestId, string targetDeviceId, Activity activity, string mode, HandoffChoice? choice = null)
     {
+        if (!Streams(choice, mode, activity) && CaptureBrowserReturnTarget?.Invoke(activity) is { } returnTab
+            && History.Find(requestId)?.Intent is { } intent)
+        {
+            activity = activity with { ContinuationId = requestId };
+            Track(new HandoffEvent(requestId, LocalDeviceId, targetDeviceId, activity.Title, null, "Sending…"),
+                intent with { Activity = activity, ReturnTab = returnTab });
+        }
         StreamOffer? offer = null;
         if (Streams(choice, mode, activity))
         {
@@ -475,7 +485,7 @@ public sealed class HandoffCoordinator : IDisposable
             case MessageTypes.ActivityList:
             {
                 var list = envelope.ReadRequired<ActivityListPayload>();
-                _phoneActivities[deviceId] = list with { Activities = list.Activities.Select(activity => activity.Normalized()).ToArray() };
+                _phoneActivities[deviceId] = list with { Activities = list.Activities.Select(activity => FromPhone(activity, deviceId)).ToArray() };
                 ScheduleBroadcast();
                 break;
             }
@@ -507,7 +517,7 @@ public sealed class HandoffCoordinator : IDisposable
             {
                 var received = envelope.ReadRequired<HandoffDeliverPayload>();
                 if (received.SourceDeviceId != deviceId) break;
-                var deliver = received with { Activity = received.Activity.Normalized() };
+                var deliver = received with { Activity = FromPhone(received.Activity, deviceId) };
                 var original = History.Find(deliver.RequestId)?.Event;
                 if (original is not null && (original.SourceDeviceId != deliver.SourceDeviceId || original.TargetDeviceId != deliver.TargetDeviceId)) break;
                 if (History.Find(deliver.RequestId)?.Event.Status is { } finished)
@@ -650,16 +660,17 @@ public sealed class HandoffCoordinator : IDisposable
             {
                 // A browser picked for it opens it the same way the default does: at its position,
                 // in the tab that still has it when there is one.
-                if (_apps.BrowserExeFor(choice) is { } browser && activity.Url is not null && OpenInBrowser is { } openIn
-                    && await openIn(activity, browser) is { } opened)
+                if (OpenInBrowser is { } openIn &&
+                    (_apps.BrowserExeFor(choice) is not null || choice.Kind == ChoiceKinds.Web && activity.ContinuationId is not null)
+                    && await openIn(activity, _apps.BrowserExeFor(choice)) is { } opened)
                 {
                     result = opened;
                 }
                 // Media coming back to an app picked for it continues where it is.
-                else if (choice.Kind == ChoiceKinds.App && activity.Playback is { } playback && _apps.ResumeExisting is { } resume
-                    && await resume(activity, playback.PositionAt(DateTimeOffset.UtcNow)))
+                else if (choice.Kind == ChoiceKinds.App && activity.ContinuationId is null && activity.Playback is { } playback && _apps.ResumeExisting is { } resume
+                    && await resume(activity, playback.PositionAt(DateTimeOffset.UtcNow), null) is { } resumed)
                 {
-                    result = OpenResult.Opened("Continued where it was on this PC");
+                    result = resumed;
                 }
                 else
                 {
@@ -831,6 +842,12 @@ public sealed class HandoffCoordinator : IDisposable
     }
 
     private static string NewRequestId() => Guid.NewGuid().ToString("N");
+
+    private Activity FromPhone(Activity activity, string deviceId) => activity.Normalized() with
+    {
+        DeviceId = deviceId,
+        ContinuationId = History.Continuation(activity.ContinuationId, deviceId) is not null ? activity.ContinuationId : null
+    };
 }
 
 /// <summary>An opener that can move something it already opened to the right position.</summary>

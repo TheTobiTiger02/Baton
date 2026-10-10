@@ -276,7 +276,9 @@ data class Activity(
     /** In the window (or browser tab) the user last had in front. Null when unknown. */
     val focused: Boolean? = null,
     /** The first words at the top of a page's view: a browser opening it scrolls there. */
-    val textAnchor: String? = null
+    val textAnchor: String? = null,
+    /** The PC handoff this activity continues; the PC validates its original recipient. */
+    val continuationId: String? = null
 )
 
 @Serializable

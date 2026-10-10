@@ -98,13 +98,40 @@ object ContentLinks {
         return videoIdPath.find(uri.path ?: "")?.groupValues?.get(1)
     }
 
-    private val twitchVideo = Regex("""^https?://(?:www\.|m\.)?twitch\.tv/videos/(\d+)""", RegexOption.IGNORE_CASE)
+    private val twitchChannelName = Regex("[A-Za-z0-9_]{3,25}")
+    private val twitchPages = setOf("directory", "search", "videos", "settings", "downloads", "subscriptions", "inventory", "login", "signup", "wallet", "drops")
+
+    fun twitchChannel(name: String?): String? = name?.takeIf { twitchChannelName.matches(it) && it.lowercase() !in twitchPages }
+        ?.let { "https://www.twitch.tv/${it.lowercase()}" }
+
+    fun twitchUrl(value: String?): String? {
+        val uri = runCatching { java.net.URI(value ?: return null) }.getOrNull() ?: return null
+        val parts = uri.path.orEmpty().trim('/').split('/')
+        if (uri.scheme == "twitch") return when {
+            uri.host in setOf("stream", "channel") && parts.size == 1 -> twitchChannel(parts[0])
+            uri.host in setOf("video", "videos") && parts.size == 1 && parts[0].matches(Regex("[0-9]+")) -> "https://www.twitch.tv/videos/${parts[0]}"
+            else -> null
+        }
+        if (uri.scheme !in setOf("http", "https") || uri.port != -1 || uri.host?.lowercase() !in setOf("twitch.tv", "www.twitch.tv", "m.twitch.tv")) return null
+        if (parts.size == 1) return twitchChannel(parts[0])
+        return if (parts.size == 2 && parts[0] == "videos" && parts[1].matches(Regex("[0-9]+"))) "https://www.twitch.tv/videos/${parts[1]}" else null
+    }
+
+    fun isTwitchLive(url: String?): Boolean = twitchUrl(url)?.let { !it.contains("/videos/") } == true
+
+    fun twitchMediaUrl(links: List<String?>, title: String?, artist: String?): String? {
+        links.firstNotNullOfOrNull(::twitchUrl)?.let { return it }
+        // Twitch's live notification labels the broadcaster as TITLE and the game as
+        // ARTIST="Streaming <category>" (verified on the Galaxy S25). A stream title is not a channel.
+        if (artist?.startsWith("Streaming ", ignoreCase = true) == true) return twitchChannel(title)
+        return twitchChannel(artist)
+    }
 
     /** A Twitch past broadcast at the second it was left: `?t=1h2m3s`. Live channels have no time. */
     fun withTwitchTime(url: String, positionMs: Long): String {
-        val id = twitchVideo.find(url)?.groupValues?.get(1) ?: return url
-        val seconds = positionMs / 1000
-        return "https://www.twitch.tv/videos/$id?t=${seconds / 3600}h${seconds / 60 % 60}m${seconds % 60}s"
+        val target = twitchUrl(url)?.takeIf { it.contains("/videos/") } ?: return url
+        val seconds = (positionMs / 1000).coerceAtLeast(0)
+        return "$target?t=${seconds / 3600}h${seconds / 60 % 60}m${seconds % 60}s"
     }
 
     /**

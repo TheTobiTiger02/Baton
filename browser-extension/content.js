@@ -2,8 +2,9 @@
 // The background worker decides what to tell Baton; this script only observes, pauses and seeks.
 
 (() => {
-  if (window.__batonContent) return;
-  window.__batonContent = true;
+  const contentVersion = chrome.runtime.getManifest().version;
+  if (window.__batonContent === contentVersion) return;
+  window.__batonContent = contentVersion;
 
   let media = null;
   let lastSent = "";
@@ -235,9 +236,15 @@
         return;
       }
       const before = media.currentTime;
-      holdAt(message.positionMs / 1000);
-      if (message.play) media.play().catch(() => {});
-      reply({ applied: true, before, after: media.currentTime, duration: media.duration });
+      const player = media;
+      const live = message.mode === "live" || !isFinite(player.duration);
+      if (live) hold = null;
+      else holdAt(message.positionMs / 1000);
+      Promise.resolve().then(() => message.play ? player.play() : undefined).then(() => {
+        reply({ applied: live || Math.abs(player.currentTime - message.positionMs / 1000) < 2,
+          before, after: player.currentTime, duration: player.duration });
+      }).catch(error => reply({ applied: false, reason: error.message }));
+      return true;
     }
   });
 })();

@@ -15,6 +15,7 @@ let sendTimer = null;
 let token = globalThis.BATON_TOKEN || null;
 let awaitingApproval = false;
 let confirmsHandoffs = false;
+let browserInstanceId = null;
 const transfers = new Map();
 
 function startTransfer(message) {
@@ -33,7 +34,7 @@ function startTransfer(message) {
   }
   const sent = send(previous?.sent
     ? { type: "handoffRetry", requestId, previousRequestId: previous.requestId }
-    : message.url ? { type: "sendUrl", requestId, url: message.url, targetDeviceId: message.targetDeviceId }
+    : message.url ? { type: "sendUrl", requestId, tabId: message.tabId, url: message.url, targetDeviceId: message.targetDeviceId }
     : { type: "send", requestId, tabId: message.tabId, targetDeviceId: message.targetDeviceId });
   transfer.sent = sent;
   if (!sent) Object.assign(transfer, { status: "failed", detail: "Baton is disconnected. Reconnect before retrying." });
@@ -41,8 +42,10 @@ function startTransfer(message) {
   return transfer;
 }
 
-const tokenLoaded = chrome.storage.local.get("batonToken").then((stored) => {
+const tokenLoaded = chrome.storage.local.get(["batonToken", "browserInstanceId"]).then(async (stored) => {
   if (stored && stored.batonToken) token = stored.batonToken;
+  browserInstanceId = stored?.browserInstanceId || crypto.randomUUID();
+  if (!stored?.browserInstanceId) await chrome.storage.local.set({ browserInstanceId });
 }).catch(() => {});
 
 async function browserName() {
@@ -71,7 +74,7 @@ function connect() {
     // Anything but Baton's development build proves itself with its token; without one, Baton
     // asks the user to allow this browser and then sends one.
     await tokenLoaded;
-    send({ type: "hello", browser: await browserName(), token, version: chrome.runtime.getManifest().version });
+    send({ type: "hello", browser: await browserName(), token, version: chrome.runtime.getManifest().version, browserInstanceId, tabReturn: true });
     scheduleReport(0);
   };
   socket.onmessage = (event) => onHostMessage(JSON.parse(event.data));
@@ -199,6 +202,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     if (!previous || JSON.stringify(previous.media && { ...previous.media, positionMs: 0 }) !== JSON.stringify(current.media && { ...current.media, positionMs: 0 }) || previous.url !== current.url || previous.anchor !== current.anchor) {
       scheduleReport();
     }
+    if (current.media) applyPendingSeek(sender.tab.id, current.url, frameId);
     return;
   }
   if (message.type === "ready" && sender.tab) {
@@ -287,29 +291,44 @@ async function onHostMessage(message) {
       break;
     }
     case "resume": {
-      // Back from the phone: continue in the tab it left, not a new one. A tab the browser
-      // unloaded meanwhile is reloaded at the phone's position (its link carries the time).
-      const before = await chrome.tabs.get(message.tabId).catch(() => null);
-      const reload = before && before.discarded && message.url;
-      const tab = await chrome.tabs.update(message.tabId, reload ? { active: true, url: message.url } : { active: true }).catch(() => null);
-      if (!tab) {
-        send({ type: "resumed", requestId: message.requestId, applied: false });
+      let before = message.tabId != null ? await chrome.tabs.get(message.tabId).catch(() => null) : null;
+      if (before && message.expectedUrl && !sameContent(before.url, message.expectedUrl)) before = null;
+      if (!before && (message.tabId == null || message.allowCreate)) {
+        before = (await chrome.tabs.query({}).catch(() => [])).filter(tab => sameContent(tab.url, message.url))
+          .sort((a, b) => Number(b.active) - Number(a.active) || (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
+      }
+      if (!before && !message.allowCreate) {
+        send({ type: "resumed", requestId: message.requestId, activated: false, applied: false });
         break;
       }
-      chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
-      // A tab the browser unloaded meanwhile reloads now; the seek then waits for its player.
-      pendingSeeks.push({ url: tab.url, positionMs: message.positionMs, expiresAt: Date.now() + PENDING_SEEK_MS });
-      const result = reload ? { applied: true, reason: "reloading at the link's time" }
-        : (await askTab(message.tabId, { type: "seek", positionMs: message.positionMs, play: true })) || { applied: false, reason: "no page script" };
-      send({ type: "resumed", requestId: message.requestId, applied: !!result.applied });
-      send({ type: "log", text: `resume tab ${message.tabId} at ${message.positionMs} ms: ${JSON.stringify(result)}` });
+      const mode = message.mode || "seek";
+      const navigating = !before || !!message.url && (before.discarded || !sameContent(before.url, message.url)
+        || mode === "page" && before.url !== message.url);
+      const tab = await (before
+        ? chrome.tabs.update(before.id, navigating ? { active: true, url: message.url } : { active: true })
+        : chrome.tabs.create({ active: true, url: message.url })).catch(() => null);
+      if (!tab) {
+        send({ type: "resumed", requestId: message.requestId, activated: false, applied: false });
+        break;
+      }
+      await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+      let result = { applied: true };
+      if (mode !== "page") {
+        pendingSeeks = pendingSeeks.filter(entry => entry.tabId !== tab.id);
+        pendingSeeks.push({ tabId: tab.id, url: message.url || tab.url, mode, positionMs: message.positionMs, expiresAt: Date.now() + PENDING_SEEK_MS });
+        result = navigating ? { applied: !message.mode, reason: "waiting for the destination player" }
+          : (await askTab(tab.id, { type: "seek", mode, positionMs: message.positionMs, play: true })) || { applied: false, reason: "no page script" };
+        if (result.applied && !navigating) pendingSeeks = pendingSeeks.filter(entry => entry.tabId !== tab.id);
+      }
+      send({ type: "resumed", requestId: message.requestId, tabId: tab.id, activated: true, applied: !!result.applied });
+      send({ type: "log", text: `resume tab ${tab.id} (${mode}): ${JSON.stringify(result)}` });
       break;
     }
     case "command":
       askTab(message.tabId, { type: "command", action: message.action, positionMs: message.positionMs, volume: message.volume });
       break;
     case "expect":
-      pendingSeeks.push({ url: message.url, positionMs: message.positionMs, expiresAt: Date.now() + PENDING_SEEK_MS });
+      pendingSeeks.push({ url: message.url, mode: message.mode, positionMs: message.positionMs, expiresAt: Date.now() + PENDING_SEEK_MS });
       break;
   }
 }
@@ -318,19 +337,24 @@ function sameContent(a, b) {
   try {
     const ua = new URL(a);
     const ub = new URL(b);
-    const va = ua.searchParams.get("v");
-    const vb = ub.searchParams.get("v");
-    if (va || vb) return va === vb;
-    return ua.host === ub.host && ua.pathname.replace(/\/$/, "") === ub.pathname.replace(/\/$/, "");
+    const twitch = u => /^(www\.|m\.)?twitch\.tv$/.test(u.hostname) && !u.port;
+    const host = u => twitch(u) ? "twitch.tv" : u.host.replace(/^www\./, "");
+    const path = u => twitch(u) ? u.pathname.replace(/\/+$/, "").toLowerCase() : u.pathname.replace(/\/+$/, "");
+    const query = u => u.search.slice(1).split("&").filter(pair => pair &&
+      !["t", "start", "time_continue", "si", "feature", "pp"].includes(pair.split("=")[0]) && !pair.startsWith("utm_")).sort().join("&");
+    return host(ua) === host(ub) && path(ua) === path(ub) && query(ua) === query(ub);
   } catch {
     return false;
   }
 }
 
-function applyPendingSeek(tabId, url, frameId) {
+async function applyPendingSeek(tabId, url, frameId) {
   pendingSeeks = pendingSeeks.filter((p) => p.expiresAt > Date.now());
-  const index = pendingSeeks.findIndex((p) => sameContent(p.url, url));
+  const index = pendingSeeks.findIndex((p) => !p.inFlight && (p.tabId == null || p.tabId === tabId) && sameContent(p.url, url));
   if (index < 0) return;
-  const [seek] = pendingSeeks.splice(index, 1);
-  chrome.tabs.sendMessage(tabId, { type: "seek", positionMs: seek.positionMs, play: true }, { frameId }).catch(() => {});
+  const seek = pendingSeeks[index];
+  seek.inFlight = true;
+  const result = await chrome.tabs.sendMessage(tabId, { type: "seek", mode: seek.mode || "seek", positionMs: seek.positionMs, play: true }, { frameId }).catch(() => null);
+  seek.inFlight = false;
+  if (result?.applied) pendingSeeks = pendingSeeks.filter(entry => entry !== seek);
 }

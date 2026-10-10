@@ -15,7 +15,7 @@ public sealed class MediaOpener(
     YouTubeResolver youtube,
     DiagnosticsLog diagnostics,
     Action<string, long>? expectBrowserSeek = null,
-    Func<Activity, long, Task<bool>>? resumeExisting = null) : IActivityOpener, IPositionReconciler
+    Func<Activity, long, string?, Task<OpenResult?>>? resumeExisting = null) : IActivityOpener, IPositionReconciler
 {
     public async Task<bool> ReconcileAsync(Activity activity, long positionMs, CancellationToken cancellationToken)
     {
@@ -26,10 +26,12 @@ public sealed class MediaOpener(
 
         // A browser tab is corrected through the extension: browsers' system media controls
         // (Zen's, Firefox's) often can't seek.
-        if (resumeExisting is not null && await resumeExisting(activity, positionMs))
+        if (resumeExisting is not null && await resumeExisting(activity, positionMs, null) is { } resumed)
         {
-            return true;
+            return resumed.Status == HandoffStatus.Opened;
         }
+
+        if (activity.Url is { } url && ContentLinks.IsTwitchLive(url)) return false;
 
         var provider = activity.Content?.Provider;
         return await sessions.ReconcileAsync(
@@ -60,9 +62,9 @@ public sealed class MediaOpener(
         var positionMs = activity.Playback?.PositionAt(DateTimeOffset.UtcNow) ?? 0;
 
         // Still open here (the tab it was sent from)? Continue there before looking anything up.
-        if (activity.Playback is not null && resumeExisting is not null && await resumeExisting(activity, positionMs))
+        if (resumeExisting is not null && await resumeExisting(activity, positionMs, browserExe) is { } resumed)
         {
-            return OpenResult.Opened("Continued where it was on this PC");
+            return resumed;
         }
 
         var (target, result) = await ChooseTargetAsync(activity, positionMs, cancellationToken);
@@ -72,10 +74,10 @@ public sealed class MediaOpener(
         }
 
         // Back to where it came from: the tab (or app) that still has it continues, no new tab.
-        if (activity.Playback is not null && resumeExisting is not null
-            && await resumeExisting(activity with { Url = target.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? target : activity.Url }, positionMs))
+        if (resumeExisting is not null
+            && await resumeExisting(activity with { Url = target.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? target : activity.Url }, positionMs, browserExe) is { } matched)
         {
-            return OpenResult.Opened("Continued where it was on this PC");
+            return matched;
         }
 
         diagnostics.Record(DiagnosticsCategory.Handoff, "open.link", target);
@@ -90,7 +92,7 @@ public sealed class MediaOpener(
             ? new ProcessStartInfo(browserExe) { UseShellExecute = false, ArgumentList = { target } }
             : new ProcessStartInfo(target) { UseShellExecute = true });
 
-        if (activity.Playback is not null && result.Status == HandoffStatus.Opened)
+        if (activity.Playback is not null && result.Status == HandoffStatus.Opened && !ContentLinks.IsTwitchLive(target))
         {
             var provider = activity.Content?.Provider;
             _ = sessions.ReconcileAsync(
@@ -111,7 +113,7 @@ public sealed class MediaOpener(
             // A page opens scrolled to where it was read (the anchor); a video at its second.
             return (ContentLinks.YouTubeVideoId(url) is not null
                 ? ContentLinks.WithYouTubeTime(url, positionMs)
-                : ContentLinks.WithTextAnchor(url, activity.TextAnchor), OpenResult.Opened());
+                : ContentLinks.WithTextAnchor(ContentLinks.WithTwitchTime(url, positionMs), activity.TextAnchor), OpenResult.Opened());
         }
 
         var content = activity.Content;

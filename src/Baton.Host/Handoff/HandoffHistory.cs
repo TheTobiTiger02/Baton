@@ -1,9 +1,10 @@
 using Baton.Protocol;
+using Baton.Host.Browser;
 
 namespace Baton.Host.Handoff;
 
 public sealed record HandoffIntent(string SourceDeviceId, string TargetDeviceId, string? ActivityId,
-    string Mode, HandoffChoice? Choice, Activity? Activity = null, bool Standalone = false)
+    string Mode, HandoffChoice? Choice, Activity? Activity = null, bool Standalone = false, BrowserReturnTarget? ReturnTab = null)
 {
     public bool Streaming => Choice?.Kind switch
     {
@@ -42,6 +43,26 @@ public sealed class HandoffHistory
     public HandoffRecord? Find(string id)
     {
         lock (_gate) return _records.GetValueOrDefault(id);
+    }
+
+    public HandoffRecord? Continuation(string? id, string phoneId)
+    {
+        if (id is null) return null;
+        lock (_gate)
+        {
+            var record = _records.GetValueOrDefault(id);
+            return record is { Intent.ReturnTab: not null, Event.Status: HandoffStatus.Opened or HandoffStatus.Fallback }
+                && record.Intent.TargetDeviceId == phoneId && !record.Intent.Streaming ? record : null;
+        }
+    }
+
+    public void UpdateReturnTab(string id, int tabId, string url)
+    {
+        lock (_gate)
+        {
+            if (_records.TryGetValue(id, out var record) && record.Intent?.ReturnTab is { } target)
+                _records[id] = record with { Intent = record.Intent with { ReturnTab = target with { TabId = tabId, Url = url } } };
+        }
     }
 
     public bool Observe(HandoffEvent value, HandoffIntent? intent = null, DateTimeOffset? now = null)

@@ -60,6 +60,7 @@ class ShareToPcActivity : Activity() {
         val sourceApp = when {
             url.contains("music.youtube.com") -> KnownApps.fromProvider("youtubemusic")
             ContentLinks.youTubeVideoId(url) != null -> KnownApps.fromProvider("youtube")
+            ContentLinks.twitchUrl(url) != null -> KnownApps.fromProvider("twitch")
             url.contains("spotify") -> KnownApps.fromProvider("spotify")
             else -> null
         }

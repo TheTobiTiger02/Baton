@@ -31,11 +31,12 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
 
     private readonly ConcurrentDictionary<string, Connection> _connections = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, TaskCompletionSource<TabState?>> _takes = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _resumes = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, (string ConnectionId, TaskCompletionSource<ResumeReply> Reply)> _resumes = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string?> _artwork = new(StringComparer.Ordinal);
     private readonly BrowserHandoffRequests _handoffs = new();
     public event Action<BrowserSendRequest>? CorrelatedSendRequested;
     public Func<string, HandoffRecord?>? FindHandoff { get; set; }
+    public Action<string, int, string>? ReturnTabUpdated { get; set; }
     public event Action<string, string>? CorrelatedRetryRequested;
     public void PublishHandoff(HandoffEvent value)
     {
@@ -226,7 +227,7 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
     {
         foreach (var connection in ProvenConnections)
         {
-            _ = SendAsync(connection, new { type = "expect", url, positionMs });
+            _ = SendAsync(connection, new { type = "expect", url, positionMs, mode = ContentLinks.IsTwitchLive(url) ? "live" : "seek" });
         }
     }
 
@@ -234,72 +235,120 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
     /// Continues <paramref name="activity"/> in a tab that already shows it (the one it was sent
     /// from, usually) instead of opening another: same video, else same page, else same title.
     /// </summary>
-    public async Task<bool> TryResumeAsync(Activity activity, long positionMs)
+    public BrowserReturnTarget? CaptureReturnTarget(Activity activity)
     {
+        var parts = activity.Id.Split(':');
+        if (parts.Length != 3 || parts[0] != "tab" || !int.TryParse(parts[2], out var tabId)
+            || !_connections.TryGetValue(parts[1], out var connection) || !connection.Proven
+            || !connection.SupportsTabReturn || connection.BrowserInstanceId is not { } instanceId)
+            return null;
+        var tab = connection.Tabs.FirstOrDefault(tab => tab.TabId == tabId);
+        return tab is null ? null : new BrowserReturnTarget(instanceId, tabId, tab.Url);
+    }
+
+    public async Task<OpenResult?> TryResumeAsync(Activity activity, long positionMs, string? browserExe = null)
+    {
+        var record = activity.ContinuationId is { } id ? FindHandoff?.Invoke(id) : null;
+        var origin = record is { Event.Status: HandoffStatus.Opened or HandoffStatus.Fallback, Intent.ReturnTab: not null }
+            && record.Intent.TargetDeviceId == activity.DeviceId && !record.Intent.Streaming ? record.Intent.ReturnTab : null;
+        var sent = origin is not null ? record!.Intent!.Activity : null;
+        // Native apps may move to another item without publishing its URL. Only reuse a known
+        // identity, or Twitch's explicitly supported last-sent-link fallback.
+        var sameIdentity = sent is not null && (activity.Content?.Id is { } contentId
+            ? contentId == sent.Content?.Id || contentId == ContentLinks.YouTubeVideoId(sent.Url)
+            : MediaOpener.TitlesMatch(activity.Title, sent.Title) && activity.Subtitle == sent.Subtitle);
+        var targetUrl = activity.Url ?? (sent is not null && (activity.Playback is null || sameIdentity
+            || ContentLinks.TwitchUrl(sent.Url) is not null) ? sent.Url : null);
+        if (origin is not null)
+        {
+            var connections = ProvenConnections.Where(connection => connection.SupportsTabReturn
+                && connection.BrowserInstanceId == origin.BrowserInstanceId && AllowedBrowser(connection)).ToArray();
+            if (connections.Length == 1 && targetUrl is not null)
+            {
+                return await ResumeTabAsync(connections[0], origin.TabId, targetUrl, origin.Url, activity, positionMs, activity.ContinuationId);
+            }
+        }
+
         var videoId = ContentLinks.YouTubeVideoId(activity.Url) ?? (activity.Content?.Provider is "youtube" or "youtubemusic" ? activity.Content.Id : null);
-        var best = _connections.Values
+        var best = ProvenConnections.Where(AllowedBrowser)
             .SelectMany(connection => connection.Tabs.Select(tab => (Connection: connection, Tab: tab, Score: Score(tab))))
             .Where(candidate => candidate.Score > 0)
             .OrderByDescending(candidate => candidate.Score)
             .ThenByDescending(candidate => candidate.Tab.UpdatedAt)
             .FirstOrDefault();
-        if (best.Connection is null)
+        if (best.Connection is not null)
         {
-            return false;
+            var url = targetUrl ?? best.Tab.Url;
+            var result = await ResumeTabAsync(best.Connection, best.Tab.TabId, url, best.Tab.Url, activity, positionMs);
+            if (result is not null) return result;
         }
 
-        var url = videoId is not null ? ContentLinks.WithYouTubeTime(best.Tab.Url, positionMs) : best.Tab.Url;
+        // Activity reports deliberately omit dormant tabs; ask the extension's native tab inventory too.
+        if (targetUrl is not null)
+            foreach (var connection in ProvenConnections.Where(connection => connection.SupportsTabReturn && AllowedBrowser(connection)))
+                if (await ResumeTabAsync(connection, null, targetUrl, null, activity, positionMs) is { } found) return found;
+        return null;
+
+        bool AllowedBrowser(Connection connection) => browserExe is null ||
+            string.Equals(Path.GetFileNameWithoutExtension(browserExe), ProcessOf(connection), StringComparison.OrdinalIgnoreCase);
+
+        int Score(TabState tab)
+        {
+            if (videoId is not null && ContentLinks.YouTubeVideoId(tab.Url) == videoId) return 3;
+            if (targetUrl is not null)
+                return SamePage(targetUrl, tab.Url) || tab.Media?.Url is { } post && SamePage(targetUrl, post) ? 2 : 0;
+            return tab.Media is { } media && MediaOpener.TitlesMatch(media.Title ?? tab.Title ?? "", activity.Title) ? 1 : 0;
+        }
+    }
+
+    private async Task<OpenResult?> ResumeTabAsync(Connection connection, int? tabId, string url, string? expectedUrl,
+        Activity activity, long positionMs, string? continuationId = null)
+    {
+        url = ContentLinks.YouTubeVideoId(url) is not null ? ContentLinks.WithYouTubeTime(url, positionMs)
+            : ContentLinks.WithTextAnchor(ContentLinks.WithTwitchTime(url, positionMs), activity.TextAnchor);
+        var mode = activity.Playback is null ? "page" : ContentLinks.IsTwitchLive(url) ? "live" : "seek";
         var requestId = Guid.NewGuid().ToString("N");
-        var reply = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _resumes[requestId] = reply;
-        bool applied;
+        var reply = new TaskCompletionSource<ResumeReply>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _resumes[requestId] = (connection.Id, reply);
+        ResumeReply receipt;
         try
         {
-            await SendAsync(best.Connection, new { type = "resume", requestId, tabId = best.Tab.TabId, positionMs, url });
-            // Only a tab that confirms the seek (or reloads at the link's time) counts; otherwise the
-            // caller opens the page afresh at the right second. An older extension can't confirm.
-            applied = !best.Connection.ConfirmsResume
-                || await reply.Task.WaitAsync(TakeTimeout).ContinueWith(task => task.IsCompletedSuccessfully && task.Result);
+            await SendAsync(connection, new { type = "resume", requestId, tabId, positionMs, url, expectedUrl, mode, allowCreate = continuationId is not null });
+            receipt = connection.ConfirmsResume ? await reply.Task.WaitAsync(TakeTimeout) : new(true, true);
+        }
+        catch (TimeoutException)
+        {
+            // A lost acknowledgement cannot prove it didn't activate: do not open a duplicate.
+            return OpenResult.Fallback("Requested the existing tab; its playback could not be confirmed.");
         }
         finally
         {
             _resumes.TryRemove(requestId, out _);
         }
 
-        if (applied && Baton.Media.DesktopWindows.MainWindowOf(ProcessOf(best.Connection)) is { } window)
-        {
-            Baton.Media.DesktopWindows.BringToFront(window.Handle);
-        }
-
-        diagnostics.Record(DiagnosticsCategory.Handoff, applied ? "resume.tab" : "resume.tab.failed",
-            $"{best.Connection.Browser} tab {best.Tab.TabId}: {best.Tab.Title}");
-        return applied;
-
-        int Score(TabState tab)
-        {
-            if (videoId is not null && ContentLinks.YouTubeVideoId(tab.Url) == videoId)
-            {
-                return 3;
-            }
-
-            if (activity.Url is not null && (SamePage(activity.Url, tab.Url) || tab.Media?.Url is { } post && SamePage(activity.Url, post)))
-            {
-                return 2;
-            }
-
-            return tab.Media is { } media && MediaOpener.TitlesMatch(media.Title ?? tab.Title ?? "", activity.Title) ? 1 : 0;
-        }
+        diagnostics.Record(DiagnosticsCategory.Handoff, receipt.Activated ? "resume.tab" : "resume.tab.failed",
+            $"{connection.Browser} tab {tabId}: {url}");
+        if (!receipt.Activated) return null;
+        if (continuationId is not null && receipt.TabId is { } returnedTab)
+            ReturnTabUpdated?.Invoke(continuationId, returnedTab, url);
+        return receipt.Applied ? OpenResult.Opened("Continued in the existing browser tab")
+            : OpenResult.Fallback("Returned to the existing tab; playback could not be confirmed.");
     }
 
     /// <summary>
     /// The same page: host, path and query, ignoring only where in it one is (t=, start=...) and
     /// tracking tags. The query counts: /watch?v=a and /watch?v=b are different videos.
     /// </summary>
-    public static bool SamePage(string a, string b) =>
-        Uri.TryCreate(a, UriKind.Absolute, out var left) && Uri.TryCreate(b, UriKind.Absolute, out var right)
-        && string.Equals(left.Host.Replace("www.", ""), right.Host.Replace("www.", ""), StringComparison.OrdinalIgnoreCase)
-        && string.Equals(left.AbsolutePath.TrimEnd('/'), right.AbsolutePath.TrimEnd('/'), StringComparison.Ordinal)
-        && Query(left) == Query(right);
+    public static bool SamePage(string a, string b)
+    {
+        if (!Uri.TryCreate(a, UriKind.Absolute, out var left) || !Uri.TryCreate(b, UriKind.Absolute, out var right)) return false;
+        var leftTwitch = ContentLinks.TwitchUrl(a);
+        var rightTwitch = ContentLinks.TwitchUrl(b);
+        return (leftTwitch is not null && rightTwitch is not null ? leftTwitch == rightTwitch
+            : string.Equals(left.Authority.StartsWith("www.") ? left.Authority[4..] : left.Authority,
+                right.Authority.StartsWith("www.") ? right.Authority[4..] : right.Authority, StringComparison.OrdinalIgnoreCase)
+              && left.AbsolutePath.TrimEnd('/') == right.AbsolutePath.TrimEnd('/')) && Query(left) == Query(right);
+    }
 
     private static string Query(Uri uri) => string.Join('&', uri.Query.TrimStart('?')
         .Split('&', StringSplitOptions.RemoveEmptyEntries)
@@ -407,6 +456,9 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
         {
             case "hello":
                 NameFromHello(connection, message);
+                connection.BrowserInstanceId = message.TryGetProperty("browserInstanceId", out var instance)
+                    && Guid.TryParse(instance.GetString(), out var instanceId) ? instanceId.ToString() : null;
+                connection.SupportsTabReturn = message.TryGetProperty("tabReturn", out var tabReturn) && tabReturn.ValueKind == JsonValueKind.True;
                 connection.ConfirmsResume = message.TryGetProperty("version", out var version)
                     && Version.TryParse(version.GetString(), out var parsed) && parsed >= new Version(0, 1, 2);
                 _ = SendAsync(connection, new { type = "capabilities", handoffStatus = true });
@@ -424,9 +476,12 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
             case "resumed":
             {
                 var requestId = message.GetProperty("requestId").GetString() ?? string.Empty;
-                if (_resumes.TryGetValue(requestId, out var resumed))
+                if (_resumes.TryGetValue(requestId, out var resumed) && resumed.ConnectionId == connection.Id)
                 {
-                    resumed.TrySetResult(message.TryGetProperty("applied", out var applied) && applied.ValueKind == JsonValueKind.True);
+                    var applied = message.TryGetProperty("applied", out var value) && value.ValueKind == JsonValueKind.True;
+                    var activated = message.TryGetProperty("activated", out var active) ? active.ValueKind == JsonValueKind.True : applied;
+                    resumed.Reply.TrySetResult(new(activated, applied,
+                        message.TryGetProperty("tabId", out var returnedTab) && returnedTab.TryGetInt32(out var tabId) ? tabId : null));
                 }
 
                 break;
@@ -478,7 +533,9 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
             case "sendUrl":
             {
                 var url = message.GetProperty("url").GetString()!;
-                var activity = new Activity($"link:{Guid.NewGuid():N}", string.Empty, ActivityKind.WebPage, url,
+                var activityId = message.TryGetProperty("tabId", out var sourceTab) && sourceTab.ValueKind == JsonValueKind.Number
+                    ? $"tab:{connection.Id}:{sourceTab.GetInt32()}" : $"link:{Guid.NewGuid():N}";
+                var activity = new Activity(activityId, string.Empty, ActivityKind.WebPage, url,
                     new ActivityApp(connection.Browser, connection.Browser.ToLowerInvariant()), DateTimeOffset.UtcNow, Url: url);
                 if (message.TryGetProperty("requestId", out var linkCorrelation))
                 {
@@ -648,7 +705,11 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
 
         /// <summary>The extension answers a resume with whether the seek applied (0.1.2 and later).</summary>
         public bool ConfirmsResume { get; set; }
+        public string? BrowserInstanceId { get; set; }
+        public bool SupportsTabReturn { get; set; }
     }
+
+    private sealed record ResumeReply(bool Activated, bool Applied, int? TabId = null);
 
     public sealed record TabState(int TabId, bool Active, string Url, string? Title, MediaState? Media, long UpdatedAt, bool? Audible = null,
         long? PlayingSince = null, string? Anchor = null);
@@ -659,3 +720,4 @@ public sealed class BrowserBridge(DiagnosticsLog diagnostics, HttpClient http) :
 }
 
 public sealed record BridgeDevice(string DeviceId, string Name, bool Online, bool IsDefault = false);
+public sealed record BrowserReturnTarget(string BrowserInstanceId, int TabId, string Url);

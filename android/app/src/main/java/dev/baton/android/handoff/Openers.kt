@@ -17,7 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-data class OpenResult(val status: HandoffStatus, val detail: String? = null)
+data class OpenResult(val status: HandoffStatus, val detail: String? = null, val openedPackage: String? = null)
 
 /**
  * Continues an activity another device handed to this phone: picks the best link or intent for
@@ -34,7 +34,8 @@ object Openers {
         when (choice?.kind) {
             ChoiceKinds.WEB -> (choice.url ?: activity.url)?.let { url ->
                 val target = if (choice.url == null) ContentLinks.withTextAnchor(url, activity.textAnchor) else url
-                return launchResult(Launcher.start(context, Intent(Intent.ACTION_VIEW, Uri.parse(target)), activity.title))
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(target))
+                return launchResult(Launcher.start(context, intent, activity.title), resolvedPackage(context, intent))
             }
             ChoiceKinds.APP -> choice.appId?.let { app ->
                 // The content's own app (or a build of it, like ReVanced) keeps the usual path,
@@ -59,13 +60,13 @@ object Openers {
             }
             val view = Intent(Intent.ACTION_VIEW, Uri.parse(target)).setPackage(app)
             if (view.resolveActivity(context.packageManager) != null) {
-                return launchResult(launch(context, view, activity, app, positionMs.takeIf { activity.playback != null }))
+                return launchResult(launch(context, view, activity, app, positionMs.takeIf { activity.playback != null }), app)
             }
         }
         val launch = context.packageManager.getLaunchIntentForPackage(app)
             ?: return OpenResult(HandoffStatus.Failed, "$label isn't installed on this phone.")
         if (!Launcher.start(context, launch, activity.title)) return launchResult(false)
-        return if (url != null) OpenResult(HandoffStatus.Fallback, "Opened $label; it can't be given the page itself.") else OpenResult(HandoffStatus.Opened)
+        return if (url != null) OpenResult(HandoffStatus.Fallback, "Opened $label; it can't be given the page itself.", app) else OpenResult(HandoffStatus.Opened, openedPackage = app)
     }
 
     suspend fun open(context: Context, activity: Activity, pinned: String? = null): OpenResult {
@@ -115,7 +116,8 @@ object Openers {
         // Also for YouTube links with a time: an app already showing that video (paused) only
         // moves there and stays paused, so the session is made to play at the right second.
         // Live streams have no second to move to.
-        return launchResult(launch(context, intent, activity, appPackage, positionMs.takeIf { activity.playback?.durationMs?.let { it > 0 } == true }))
+        return launchResult(launch(context, intent, activity, appPackage, positionMs.takeIf { activity.playback?.durationMs?.let { it > 0 } == true }),
+            appPackage ?: resolvedPackage(context, intent))
     }
 
     private suspend fun openYouTube(context: Context, activity: Activity, provider: String, positionMs: Long, pinned: String? = null): OpenResult {
@@ -178,13 +180,16 @@ object Openers {
     }
 
     /** Starts the intent, then (when [positionMs] is set) moves the resulting session there. */
-    internal fun launchResult(started: Boolean) = if (started) OpenResult(HandoffStatus.Opened,
-        "App opened; playback and exact position are not confirmed.")
+    internal fun launchResult(started: Boolean, openedPackage: String? = null) = if (started) OpenResult(HandoffStatus.Opened,
+        "App opened; playback and exact position are not confirmed.", openedPackage)
         else OpenResult(HandoffStatus.Fallback, "Tap the notification on this phone to continue; the app hasn't opened yet.")
+
+    private fun resolvedPackage(context: Context, intent: Intent): String? = intent.resolveActivity(context.packageManager)
+        ?.packageName?.takeUnless { it == "android" || it == "dev.baton.android" }
 
     private fun launch(context: Context, intent: Intent, activity: Activity, appPackage: String?, positionMs: Long?): Boolean {
         if (!Launcher.start(context, intent, activity.title)) return false
-        if (positionMs == null) return true
+        if (positionMs == null || ContentLinks.isTwitchLive(activity.url)) return true
         reconcileScope.launch {
             MediaSessions.reconcile(
                 // By title: the app may still hold the video it showed before this one loads.

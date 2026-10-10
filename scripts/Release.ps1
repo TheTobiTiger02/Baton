@@ -32,7 +32,9 @@ $props = Join-Path $root 'Directory.Build.props'
 dotnet test (Join-Path $root 'tests\Baton.Tests') --nologo
 if ($LASTEXITCODE -ne 0) { throw 'PC tests failed.' }
 
-node --test (Join-Path $root 'tests\browser-extension\handoff.test.cjs')
+$browserTests = @(Get-ChildItem (Join-Path $root 'tests\browser-extension') -Filter '*.test.cjs' -File |
+    ForEach-Object FullName)
+node --test @browserTests
 if ($LASTEXITCODE -ne 0) { throw 'Browser extension tests failed.' }
 
 $windows = Join-Path $out 'windows'

@@ -3,6 +3,7 @@ using Process = System.Diagnostics.Process;
 using ProcessStartInfo = System.Diagnostics.ProcessStartInfo;
 using System.Text.Json;
 using Baton.Protocol;
+using Baton.Host.Handoff;
 
 namespace Baton.Host.Apps;
 
@@ -31,7 +32,7 @@ public sealed class AppDirectory
     public PcApps Pc { get; }
 
     /// <summary>Continues media in the tab or app on this PC that still has it; set by the runtime.</summary>
-    public Func<Activity, long, Task<bool>>? ResumeExisting { get; set; }
+    public Func<Activity, long, string?, Task<OpenResult?>>? ResumeExisting { get; set; }
 
     /// <summary>A remembered choice was added or removed. Any thread.</summary>
     public event Action? PreferencesChanged;

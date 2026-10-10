@@ -35,8 +35,13 @@ public class ProtocolTests
         Assert.Contains("\"kind\":\"webMedia\"", json);
         Assert.Contains("\"presence\":\"active\"", json);
         Assert.DoesNotContain("\"url\"", json);
+        Assert.DoesNotContain("continuationId", json);
         var back = Json.Deserialize(json).ReadRequired<ActivityListPayload>();
         Assert.Equal(ActivityKind.WebMedia, back.Activities[0].Kind);
+        Assert.Null(back.Activities[0].ContinuationId);
+        var continued = Json.Serialize(Envelope.Create(MessageTypes.ActivityList, "dev",
+            new ActivityListPayload([activity with { ContinuationId = "return" }], PresenceState.Active)));
+        Assert.Equal("return", Json.Deserialize(continued).ReadRequired<ActivityListPayload>().Activities[0].ContinuationId);
     }
 
     [Fact]

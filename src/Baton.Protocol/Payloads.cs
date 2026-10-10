@@ -157,7 +157,8 @@ public sealed record Activity(
     double? Volume = null,
     bool? Audible = null,
     bool? Focused = null,
-    string? TextAnchor = null)
+    string? TextAnchor = null,
+    string? ContinuationId = null)
 {
     // Audible: it plays with sound right now (a muted autoplay video does not). Focused: it is in
     // the window (or the browser tab) the user last had in front. Null when the source can't tell.

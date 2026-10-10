@@ -184,6 +184,9 @@ object MediaSessions {
             ?: metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
             ?: metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
         val mediaId = metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
+        val url = if (known?.provider == "twitch") ContentLinks.twitchMediaUrl(listOf(
+            metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_URI), metadata.description.mediaUri?.toString(), mediaId
+        ), title, artist) else null
         val updatedAt = state?.lastPositionUpdateTime?.takeIf { it > 0 }
             ?.let { System.currentTimeMillis() - (SystemClock.elapsedRealtime() - it) }
             ?: System.currentTimeMillis()
@@ -198,6 +201,7 @@ object MediaSessions {
             app = ActivityApp(appName(context, packageName), packageName),
             updatedAt = Wire.time(if (playing) System.currentTimeMillis() else updatedAt),
             subtitle = artist,
+            url = url,
             artworkJpegBase64 = artwork(packageName, metadata),
             content = ActivityContent(
                 provider = when {

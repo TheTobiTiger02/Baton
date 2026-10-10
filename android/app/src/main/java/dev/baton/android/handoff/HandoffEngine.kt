@@ -66,6 +66,7 @@ object HandoffEngine {
     private val publish = Runnable { publishNow() }
 
     val history = HandoffHistory()
+    private val continuations = MediaContinuations()
     private var expiry: kotlinx.coroutines.Job? = null
     private fun begin(id: String, activity: Activity?, source: String, target: String, mode: String, choice: HandoffChoice?,
         title: String = activity?.title ?: "Activity", standalone: Boolean = false, activityId: String? = activity?.id) {
@@ -191,6 +192,7 @@ object HandoffEngine {
         MediaSessions.onChanged = null
         BrowserPages.onChanged = null
         appContext = null
+        continuations.clear()
     }
 
     /** The session to the PC became ready: tell it everything at once. */
@@ -233,6 +235,7 @@ object HandoffEngine {
 
     /** Hands over an activity already frozen by the caller, e.g. a player that is about to close. */
     fun send(activity: Activity, targetDeviceId: String = Link.hostId) {
+        val activity = continuations.enrich(activity, Link.hostId)
         val requestId = Wire.newId()
         begin(requestId, activity, Link.deviceId, targetDeviceId, HandoffModes.AUTO, null, standalone = true)
         notice(HandoffNotice(requestId, activity.title, "Sending to your PC…", failed = false, done = false))
@@ -365,7 +368,7 @@ object HandoffEngine {
     ) {
         val context = appContext ?: return
         val list = computeLocal()
-        val candidate = given ?: if (activityId == null) list.firstOrNull() else list.firstOrNull { it.id == activityId }
+        val candidate = given?.let { continuations.enrich(it, Link.hostId) } ?: if (activityId == null) list.firstOrNull() else list.firstOrNull { it.id == activityId }
             ?: activityId?.takeIf { it.startsWith("app:") }?.let { id ->
                 // An app picked from the list, not the one in front.
                 AppCatalog.apps(context).firstOrNull { "app:${it.id}" == id }?.let { AppCatalog.activity(context, it) }
@@ -483,9 +486,9 @@ object HandoffEngine {
             }
             speculativeResult != null && speculativeResult.status != HandoffStatus.Failed -> {
                 // Already open from the peer list: only correct the position if it drifted.
-                reconcileSpeculative(activity)
-                OpenResult(speculativeResult.status, if (speculativeResult.status == HandoffStatus.Opened && activity.playback != null)
-                    "App opened; playback position reconciliation requested, not confirmed." else speculativeResult.detail)
+                val reconciling = reconcileSpeculative(activity)
+                OpenResult(speculativeResult.status, if (speculativeResult.status == HandoffStatus.Opened && reconciling)
+                    "App opened; playback position reconciliation requested, not confirmed." else speculativeResult.detail, speculativeResult.openedPackage)
             }
             else -> {
                 notice(HandoffNotice(deliver.requestId, activity.title, "Opening…", failed = false, done = false))
@@ -493,14 +496,18 @@ object HandoffEngine {
             }
         }
         val openedMs = SystemClock.elapsedRealtime() - startedAt
+        if (deliver.sourceDeviceId == Link.hostId && stream == null && result.status != HandoffStatus.Failed)
+            continuations.bind(activity, deliver.sourceDeviceId, result.openedPackage)
+        schedulePublish()
         Log.i(TAG, "Continued '${activity.title}' (${result.status}) ${openedMs} ms after the request")
         Link.send(MessageTypes.HANDOFF_RESULT,
             HandoffResultPayload(deliver.requestId, deliver.sourceDeviceId, Link.deviceId, result.status, result.detail, openedMs = openedMs))
         finish(deliver.requestId, result.status, result.detail)
     }
 
-    private fun reconcileSpeculative(activity: Activity) {
-        val playback = activity.playback ?: return
+    private fun reconcileSpeculative(activity: Activity): Boolean {
+        val playback = activity.playback ?: return false
+        if (ContentLinks.isTwitchLive(activity.url)) return false
         scope.launch {
             MediaSessions.reconcile(
                 matches = { controller ->
@@ -512,6 +519,7 @@ object HandoffEngine {
                 toleranceMs = 2_000
             )
         }
+        return true
     }
 
     private fun schedulePublish() {
@@ -547,6 +555,7 @@ object HandoffEngine {
             (media + listOfNotNull(page)).none { it.app.id == current.app.id }
         }
         return (listOfNotNull(playing) + media + listOfNotNull(page) + listOfNotNull(app))
+            .map { continuations.enrich(it, Link.hostId) }
             .sortedWith(compareByDescending<Activity> { it.playback?.playing == true }
                 .thenByDescending { it.kind != ActivityKind.WebPage }
                 .thenByDescending { Wire.parseTime(it.updatedAt) })

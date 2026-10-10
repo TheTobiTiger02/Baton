@@ -6,6 +6,22 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ContentTest {
+    @Test fun twitchStructuredMetadataAndVerifiedChannelLayoutIdentifyCurrentContent() {
+        assertEquals("https://www.twitch.tv/videos/123456", ContentLinks.twitchMediaUrl(
+            listOf("twitch://video/123456", "https://www.twitch.tv/trymacs"), "Unrelated stream title", "SomeoneElse"))
+        assertEquals("https://www.twitch.tv/trymacs", ContentLinks.twitchMediaUrl(emptyList(), "Trymacs", "Streaming Minecraft"))
+        assertEquals("https://www.twitch.tv/papaplatte", ContentLinks.twitchMediaUrl(emptyList(), "A stream title", "Papaplatte"))
+        assertNull(ContentLinks.twitchMediaUrl(emptyList(), "Trymacs", null))
+        assertNull(ContentLinks.twitchMediaUrl(emptyList(), "Minecraft stream title", "Streaming a game"))
+    }
+
+    @Test fun twitchLinksRejectOtherHostsAndReservedPages() {
+        assertEquals("https://www.twitch.tv/trymacs", ContentLinks.twitchUrl("https://m.twitch.tv/Trymacs"))
+        assertEquals("https://www.twitch.tv/trymacs", ContentLinks.twitchUrl("twitch://stream/Trymacs"))
+        for (url in listOf("https://twitch.tv.evil.test/trymacs", "https://eviltwitch.tv/trymacs",
+            "https://twitch.tv/directory", "https://twitch.tv/search", "https://twitch.tv/trymacs/extra", "twitch://evil/trymacs"))
+            assertNull(ContentLinks.twitchUrl(url))
+    }
     @Test
     fun resolverRejectsSameTitleWithOtherLength() {
         val results = listOf(
@@ -36,6 +52,9 @@ class ContentTest {
             ContentLinks.withTwitchTime("https://www.twitch.tv/videos/2201234567?filter=archives", 3_723_900))
         // A live channel has no time to give.
         assertEquals("https://www.twitch.tv/somechannel", ContentLinks.withTwitchTime("https://www.twitch.tv/somechannel", 60_000))
+        assertEquals(true, ContentLinks.isTwitchLive("https://m.twitch.tv/Trymacs"))
+        assertEquals(false, ContentLinks.isTwitchLive("https://www.twitch.tv/videos/2201234567"))
+        assertEquals(false, ContentLinks.isTwitchLive("https://www.twitch.tv/search"))
     }
 
     @Test
