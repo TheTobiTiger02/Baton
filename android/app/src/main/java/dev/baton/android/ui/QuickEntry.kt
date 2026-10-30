@@ -47,6 +47,8 @@ class SendToPcTileService : TileService() {
 class ShareToPcActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val files = sharedFiles()
+        if (files.isNotEmpty()) return sendFiles(files)
         val text = intent?.takeIf { it.action == Intent.ACTION_SEND }?.getStringExtra(Intent.EXTRA_TEXT)
         val url = text?.let { Regex("https?://\\S+").find(it)?.value }
         if (url == null || !Link.isReady) {
@@ -84,6 +86,28 @@ class ShareToPcActivity : Activity() {
         HandoffEngine.send(activity)
         Toast.makeText(this, "Continuing on your PC", Toast.LENGTH_SHORT).show()
         finish()
+    }
+
+    /** Files (photos, videos, documents) rather than a link: the PC saves and opens them. */
+    @Suppress("DEPRECATION")
+    private fun sharedFiles(): List<android.net.Uri> = when (intent?.action) {
+        Intent.ACTION_SEND -> listOfNotNull(intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM))
+        Intent.ACTION_SEND_MULTIPLE -> intent.getParcelableArrayListExtra<android.net.Uri>(Intent.EXTRA_STREAM).orEmpty()
+        else -> emptyList()
+    }
+
+    private fun sendFiles(files: List<android.net.Uri>) {
+        if (!Link.isReady) {
+            Toast.makeText(this, "Not connected to your PC.", Toast.LENGTH_SHORT).show()
+            finish()
+            return
+        }
+        Toast.makeText(this, if (files.size == 1) "Sending to your PC…" else "Sending ${files.size} files to your PC…", Toast.LENGTH_SHORT).show()
+        // The copy needs the share's permission, which ends when this screen closes: close after it.
+        Thread({
+            dev.baton.android.transfer.FileTransfers.send(this, files)
+            runOnUiThread { finish() }
+        }, "Baton share").start()
     }
 }
 

@@ -23,6 +23,12 @@ class MainActivity : ComponentActivity() {
         setContent { BatonTheme { BatonApp(trust) } }
     }
 
+    /** In front with focus, the one moment Android lets Baton read a copy made on this phone. */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) dev.baton.android.stream.ClipboardSync.onAppForeground(this)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handle(intent)

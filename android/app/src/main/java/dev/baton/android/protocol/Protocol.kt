@@ -56,6 +56,15 @@ object MessageTypes {
     const val DEVICE_INFO = "device.info"
     const val DEVICE_FORGET = "device.forget"
     const val DEVICE_FORGOTTEN = "device.forgotten"
+    /** The PC asks this phone to ring, so it can be found. */
+    const val DEVICE_RING = "device.ring"
+    const val FILE_OFFER = "file.offer"
+    const val FILE_UPLOAD = "file.upload"
+    const val FILE_RESULT = "file.result"
+    const val NOTIFICATION_POSTED = "notification.posted"
+    const val NOTIFICATION_REMOVED = "notification.removed"
+    const val NOTIFICATION_DISMISS = "notification.dismiss"
+    const val NOTIFICATION_REPLY = "notification.reply"
     const val PEERS = "peers"
     const val ERROR = "error"
     const val ACTIVITY_LIST = "activity.list"
@@ -195,8 +204,46 @@ data class DeviceInfoPayload(
     val screenWidth: Int? = null,
     val screenHeight: Int? = null,
     /** Compressed audio this phone plays (`opus`); PCM always works. */
-    val audioCodecs: List<String>? = null
+    val audioCodecs: List<String>? = null,
+    /** With [batteryLevel] (percent): resent whenever either changes. */
+    val charging: Boolean? = null
 )
+
+@Serializable
+data class RingPayload(val seconds: Int = 30)
+
+/** A file one device sends another; from the PC, [token] names it at `/files/{token}`. */
+@Serializable
+data class FileOfferPayload(val transferId: String, val name: String, val size: Long, val mime: String? = null, val token: String? = null)
+
+/** Where to upload the file this phone offered: `PUT /upload/{token}`, once. */
+@Serializable
+data class FileUploadPayload(val transferId: String, val token: String)
+
+/** How a file arrived, told by the device that received it. */
+@Serializable
+data class FileResultPayload(val transferId: String, val ok: Boolean, val detail: String? = null)
+
+/** A notification on this phone, for the PC to show. [code] is a one-time code found in it. */
+@Serializable
+data class NotificationPayload(
+    val key: String,
+    val appId: String,
+    val appName: String,
+    val title: String,
+    val text: String,
+    val postedAt: String,
+    val canReply: Boolean = false,
+    val code: String? = null
+)
+
+/** A notification by its key: gone from the phone, or dismissed on the PC. */
+@Serializable
+data class NotificationKeyPayload(val key: String)
+
+/** A reply typed on the PC, for the app that posted the notification. */
+@Serializable
+data class NotificationReplyPayload(val key: String, val text: String)
 
 @Serializable
 data class DeviceForgetPayload(val reason: String? = null)

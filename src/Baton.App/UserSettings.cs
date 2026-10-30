@@ -14,6 +14,27 @@ internal static class UserSettings
         set => Write(nameof(SuggestOnReturn), value);
     }
 
+    /// <summary>Phones' notifications show on this PC.</summary>
+    public static bool ShowPhoneNotifications
+    {
+        get => Read(nameof(ShowPhoneNotifications), true);
+        set => Write(nameof(ShowPhoneNotifications), value);
+    }
+
+    /// <summary>A file from a phone opens as soon as it arrives (documents, pictures and media only).</summary>
+    public static bool OpenReceivedFiles
+    {
+        get => Read(nameof(OpenReceivedFiles), true);
+        set => Write(nameof(OpenReceivedFiles), value);
+    }
+
+    /// <summary>Copies travel between this PC and connected phones all the time, not only while one shows the other.</summary>
+    public static bool SyncClipboard
+    {
+        get => Read(nameof(SyncClipboard), true);
+        set => Write(nameof(SyncClipboard), value);
+    }
+
     /// <summary>The phone the send shortcut went to last; it goes there again.</summary>
     public static string? LastTargetDeviceId
     {

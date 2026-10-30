@@ -83,6 +83,90 @@ fun SuggestionSetting() {
     }
 }
 
+/** "Notifications on your PC", and the apps whose notifications stay here. */
+@Composable
+fun NotificationsSetting() {
+    val context = LocalContext.current
+    var enabled by remember { mutableStateOf(BatonSettings.mirrorNotifications(context)) }
+    var offApps by remember { mutableStateOf(BatonSettings.notificationsOffApps(context)) }
+    var picking by remember { mutableStateOf(false) }
+    val names = remember { AppCatalog.apps(context).associate { it.id to it.name } }
+
+    fun setOffApps(next: Set<String>) {
+        offApps = next
+        BatonSettings.setNotificationsOffApps(context, next)
+    }
+
+    SettingsCardColumn {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable {
+            enabled = !enabled
+            BatonSettings.setMirrorNotifications(context, enabled)
+        }) {
+            Column(Modifier.weight(1f)) {
+                Text("Notifications on your PC", style = MaterialTheme.typography.titleMedium)
+                Text("While you aren't using this phone, its notifications show on your PC. Reply or dismiss them there; " +
+                    "a one-time code is copied for you. Silent notifications and what apps hide from the lock screen stay here.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.width(Tokens.Space3))
+            Switch(checked = enabled, onCheckedChange = {
+                enabled = it
+                BatonSettings.setMirrorNotifications(context, it)
+            })
+        }
+        if (enabled) {
+            HorizontalDivider(Modifier.padding(vertical = Tokens.Space2))
+            Text("Off for these apps", style = MaterialTheme.typography.bodyLarge)
+            offApps.sortedBy { (names[it] ?: it).lowercase() }.forEach { packageName ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(names[packageName] ?: packageName, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { setOffApps(offApps - packageName) }) {
+                        Icon(Icons.Rounded.Close, contentDescription = "Show ${names[packageName] ?: packageName} on the PC again")
+                    }
+                }
+            }
+            TextButton(onClick = { picking = true }, contentPadding = PaddingValues(0.dp)) { Text("Add app") }
+        }
+    }
+
+    if (picking) {
+        AppPickerSheet(onDismiss = { picking = false }, title = "Keep notifications on this phone for") { app ->
+            picking = false
+            setOffApps(offApps + app.id)
+        }
+    }
+}
+
+/** "Sync clipboard": copies travel between this phone and the PC while connected. */
+@Composable
+fun ClipboardSetting() {
+    val context = LocalContext.current
+    var enabled by remember { mutableStateOf(BatonSettings.syncClipboard(context)) }
+    val shizuku by ShizukuAccess.state.collectAsStateWithLifecycle()
+
+    fun set(value: Boolean) {
+        enabled = value
+        BatonSettings.setSyncClipboard(context, value)
+        dev.baton.android.stream.ClipboardSync.linked(context, dev.baton.android.link.Link.isReady)
+    }
+
+    SettingsCardColumn {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { set(!enabled) }) {
+            Column(Modifier.weight(1f)) {
+                Text("Sync clipboard", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Text you copy on your PC can be pasted here, and the other way round. Passwords are never shared. " +
+                        if (shizuku == ShizukuAccess.State.Ready) "Copies on this phone reach the PC right away, through Shizuku."
+                        else "Android hides the clipboard from apps in the background, so a copy on this phone reaches the PC when you next open Baton (right away with Shizuku).",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.width(Tokens.Space3))
+            Switch(checked = enabled, onCheckedChange = ::set)
+        }
+    }
+}
+
 /** Three-finger swipes: up sends to the PC, down continues the PC's activity here; off per app. */
 @Composable
 fun SwipeSetting() {

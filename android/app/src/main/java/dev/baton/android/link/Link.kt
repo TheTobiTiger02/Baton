@@ -41,6 +41,9 @@ data class HandoffNotice(val requestId: String, val title: String, val text: Str
  * [LinkService] is the only writer; everything else reads the flows or calls [send].
  */
 object Link {
+    /** The PC's TLS port: the session, its files (`/files/{token}`) and uploads (`/upload/{token}`). */
+    const val FILE_PORT = 7838
+
     private val statusFlow = MutableStateFlow(LinkStatus(LinkPhase.Unpaired))
     private val peersFlow = MutableStateFlow<List<PeerInfo>>(emptyList())
     private val noticesFlow = MutableSharedFlow<HandoffNotice>(extraBufferCapacity = 16)

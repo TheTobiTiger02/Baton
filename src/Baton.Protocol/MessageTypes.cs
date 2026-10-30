@@ -14,6 +14,20 @@ public static class MessageTypes
     public const string DeviceInfo = "device.info";
     public const string DeviceForget = "device.forget";
     public const string DeviceForgotten = "device.forgotten";
+
+    /// <summary>The PC asks a phone to ring, so it can be found.</summary>
+    public const string DeviceRing = "device.ring";
+
+    // Files sent between devices.
+    public const string FileOffer = "file.offer";
+    public const string FileUpload = "file.upload";
+    public const string FileResult = "file.result";
+
+    // Phones' notifications on the PC.
+    public const string NotificationPosted = "notification.posted";
+    public const string NotificationRemoved = "notification.removed";
+    public const string NotificationDismiss = "notification.dismiss";
+    public const string NotificationReply = "notification.reply";
     public const string Peers = "peers";
     public const string Error = "error";
 

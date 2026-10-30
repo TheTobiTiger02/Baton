@@ -73,6 +73,7 @@ public sealed class HandoffCoordinator : IDisposable
         };
         host.Devices.Changed += ScheduleBroadcast;
         host.DeviceNames.Changed += ScheduleBroadcast;
+        host.Batteries.Changed += ScheduleBroadcast;
         RefreshLocal();
         _expiry = new Timer(_ => ExpirePending(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
     }
@@ -249,7 +250,8 @@ public sealed class HandoffCoordinator : IDisposable
                 DeviceKinds.Phone,
                 online,
                 list?.Presence ?? PresenceState.Idle,
-                list is null ? [] : _enricher?.Enrich(list.Activities) ?? list.Activities));
+                list is null ? [] : _enricher?.Enrich(list.Activities) ?? list.Activities,
+                online ? _host.Batteries.Get(phone.DeviceId) : null));
         }
 
         return devices;

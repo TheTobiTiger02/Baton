@@ -50,7 +50,7 @@ class PlayerActivity : AndroidActivity() {
             .build()
         player = exo
         exo.setMediaItem(MediaItem.Builder()
-            .setUri("https://${Link.pcAddress}:$FILE_PORT/files/${file.fileId}")
+            .setUri("https://${Link.pcAddress}:${Link.FILE_PORT}/files/${file.fileId}")
             .setMimeType(file.mime.takeIf { it != "application/octet-stream" })
             .build(), activity.playback?.positionAt() ?: 0L)
         exo.playWhenReady = true
@@ -106,7 +106,6 @@ class PlayerActivity : AndroidActivity() {
 
     companion object {
         private const val EXTRA_ACTIVITY = "activity"
-        private const val FILE_PORT = 7838
 
         fun intent(context: Context, activity: Activity): Intent =
             Intent(context, PlayerActivity::class.java)

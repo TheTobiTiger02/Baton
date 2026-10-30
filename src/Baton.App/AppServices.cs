@@ -34,7 +34,8 @@ internal sealed class AppServices : IDisposable
         Shell.Continue = ContinueAsync;
         Shell.DefaultPhoneId = UserSettings.LastTargetDeviceId;
         Runtime.DefaultPhone = () => UserSettings.LastTargetDeviceId;
-        Clipboard = new Mirror.ClipboardBridge(Host, app.Dispatcher);
+        Clipboard = new Mirror.ClipboardBridge(Host, app.Dispatcher) { AlwaysOn = UserSettings.SyncClipboard };
+        Notifications = new PhoneNotificationCenter(Host, app.Dispatcher, NameOf) { Enabled = UserSettings.ShowPhoneNotifications };
         Host.WindowStreams.Quality = UserSettings.StreamQuality;
         Host.WindowStreams.StreamAudio = UserSettings.StreamAudio;
         Host.WindowStreams.SessionChanged += (deviceId, title, started) =>
@@ -60,6 +61,20 @@ internal sealed class AppServices : IDisposable
 
     /// <summary>Copies travel between this PC and a phone while one shows the other.</summary>
     private Mirror.ClipboardBridge Clipboard { get; }
+
+    private PhoneNotificationCenter Notifications { get; }
+
+    public bool ShowPhoneNotifications
+    {
+        get => Notifications.Enabled;
+        set => Notifications.Enabled = UserSettings.ShowPhoneNotifications = value;
+    }
+
+    public bool SyncClipboard
+    {
+        get => Clipboard.AlwaysOn;
+        set => Clipboard.AlwaysOn = UserSettings.SyncClipboard = value;
+    }
     public IReadOnlyList<string> HotkeyProblems { get; private set; } = [];
 
     public async Task StartAsync(bool showWindow)
@@ -79,6 +94,8 @@ internal sealed class AppServices : IDisposable
             _toast.ShowSuggestion(activity, $"Continue from {phone.Name}?", "Continue here",
                 () => _ = Coordinator.PullAsync(phone.DeviceId, activity.Id));
         });
+
+        Host.Transfers.Received += (deviceId, path) => _app.Dispatcher.BeginInvoke(() => OnFileReceived(deviceId, path));
 
         // A browser extension without a token asks once; allowing it here gives it one.
         Runtime.Browser.ApprovalRequested += (connectionId, browser) => _app.Dispatcher.BeginInvoke(() =>
@@ -373,8 +390,47 @@ internal sealed class AppServices : IDisposable
         _hotkeys?.Dispose();
         _tray?.Dispose();
         Clipboard.Dispose();
+        Notifications.Dispose();
         Runtime.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(3));
     }
+
+    /// <summary>
+    /// Kinds of file that open by themselves when they arrive: documents, pictures and media. Programs,
+    /// scripts and anything else only show in their folder; they carry the Mark of the Web too.
+    /// </summary>
+    private static readonly HashSet<string> OpensOnArrival = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif", ".bmp",
+        ".mp4", ".mov", ".mkv", ".webm", ".3gp", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac",
+        ".pdf", ".txt", ".csv", ".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp"
+    };
+
+    private void OnFileReceived(string deviceId, string path)
+    {
+        void ShowInFolder() => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+        if (UserSettings.OpenReceivedFiles && OpensOnArrival.Contains(System.IO.Path.GetExtension(path)))
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+            {
+                // No app for it: the toast still leads to the folder.
+            }
+        }
+
+        _toast ??= new ToastWindow();
+        _toast.ShowAction($"Received {System.IO.Path.GetFileName(path)}", $"From {NameOf(deviceId)} · saved in Downloads\\Baton", "",
+            "Show in folder", ShowInFolder);
+    }
+
+    /// <summary>Sends files to a phone; it saves and opens them. Returns how many were sent.</summary>
+    public Task<int> SendFilesAsync(string deviceId, IReadOnlyList<string> paths) => Host.Transfers.SendAsync(deviceId, paths);
+
+    /// <summary>The phone files dropped on Baton go to: the default one when it is connected, else any connected one.</summary>
+    public string? DropTarget() =>
+        Shell.Phones.Where(phone => phone.Online).OrderByDescending(phone => phone.DeviceId == Shell.DefaultPhoneId).FirstOrDefault()?.DeviceId;
 
     private void ShowToast(HandoffEvent handoff)
     {
