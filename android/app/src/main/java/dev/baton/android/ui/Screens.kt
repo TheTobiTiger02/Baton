@@ -47,6 +47,7 @@ import androidx.compose.material.icons.rounded.Accessibility
 import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.Computer
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.QrCodeScanner
@@ -117,7 +118,10 @@ data class Grants(
     val notifications: Boolean,
     val media: Boolean,
     val accessibility: Boolean,
-    val battery: Boolean
+    val battery: Boolean,
+    val microphone: Boolean = false,
+    /** Android blocks accessibility and media access for this install until it is allowed in App info. */
+    val restricted: Boolean = false
 ) {
     val essentialsDone: Boolean get() = notifications && media
 
@@ -126,8 +130,24 @@ data class Grants(
             notifications = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED,
             media = BatonNotificationListener.isGranted(context),
             accessibility = BatonAccessibilityService.isGranted(context),
-            battery = BatteryOptimizationPrompt.isExempt(context)
+            battery = BatteryOptimizationPrompt.isExempt(context),
+            microphone = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
+            restricted = restrictedSettings(context)
         )
+
+        /**
+         * Android 13+ greys out the accessibility and notification access switches of an app
+         * installed from a downloaded file (how Baton comes from GitHub) until "Allow restricted
+         * settings" is chosen in its App info. False when it is allowed, or can't be told.
+         */
+        private fun restrictedSettings(context: Context): Boolean {
+            if (android.os.Build.VERSION.SDK_INT < 33) return false
+            return runCatching {
+                context.getSystemService(android.app.AppOpsManager::class.java).unsafeCheckOpNoThrow(
+                    "android:access_restricted_settings", android.os.Process.myUid(), context.packageName
+                ) != android.app.AppOpsManager.MODE_ALLOWED
+            }.getOrDefault(false)
+        }
     }
 }
 
@@ -258,7 +278,9 @@ private fun SetupScreen(grants: Grants, onContinue: () -> Unit) {
 private fun PermissionSteps(grants: Grants, onlyMissing: Boolean = false) {
     val context = LocalContext.current
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space3)) {
+        if (grants.restricted && (!grants.media || !grants.accessibility)) RestrictedSettingsHint()
         if (!onlyMissing || !grants.notifications) PermissionCard(Icons.Rounded.Notifications, "Notifications",
             "Shows what you can continue, one tap away.", grants.notifications, "Allow") {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -274,6 +296,36 @@ private fun PermissionSteps(grants: Grants, onlyMissing: Boolean = false) {
         if (!onlyMissing || !grants.battery) PermissionCard(Icons.Rounded.BatteryChargingFull, "Stay connected",
             "Keeps the link to your PC alive in the background.", grants.battery, "Allow") {
             BatteryOptimizationPrompt.requestExemption(context)
+        }
+        // One UI puts unused apps to sleep on top of Android's battery rules, and says nothing.
+        if (BatteryOptimizationPrompt.isOneUi() && (!onlyMissing || !grants.battery)) {
+            TextButton(onClick = { BatteryOptimizationPrompt.openOneUiSleepingApps(context) }) {
+                Text("Samsung: add Baton to “Never sleeping apps”")
+            }
+        }
+        if (!onlyMissing || !grants.microphone) PermissionCard(Icons.Rounded.Mic, "Phone sound on your PC",
+            "When your PC shows this phone, its sound plays there too. Android calls this the microphone; " +
+                "Baton only takes what apps play, never what the microphone hears.", grants.microphone, "Allow") {
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+}
+
+/** Shown while Android greys out the switches Baton needs, with the way to lift that. */
+@Composable
+private fun RestrictedSettingsHint() {
+    val context = LocalContext.current
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+        shape = RoundedCornerShape(Tokens.CardRadius), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(Tokens.Space4)) {
+            Text("Switch greyed out?", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(Tokens.Space1))
+            Text("Android blocks media access and accessibility for apps installed from a downloaded file. " +
+                "Open App info, tap ⋮ in the corner, choose “Allow restricted settings” and confirm. Then come back here.",
+                style = MaterialTheme.typography.bodyMedium)
+            TextButton(onClick = {
+                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")))
+            }, contentPadding = PaddingValues(0.dp)) { Text("Open App info") }
         }
     }
 }
@@ -729,6 +781,7 @@ private fun RecentHandoffs() {
 private enum class SettingsPage(val title: String, val summary: String) {
     Handoff("Handoff", "Suggestions when you pick up this phone"),
     Sharing("Showing this phone", "How your PC shows this phone's screen"),
+    Shizuku("Shizuku", "Optional: what it adds, and what works without it"),
     Choices("App choices", "Which app opens what you continue"),
     Permissions("Permissions", "What Baton is allowed to do"),
     Diagnostics("Diagnostics", "Connection log, to find out why the link drops"),
@@ -776,15 +829,11 @@ fun SettingsScreen(trust: TrustStore, grants: Grants, onBack: (() -> Unit)?) {
             }
             SettingsPage.Handoff -> item { SuggestionSetting() }
             SettingsPage.Sharing -> item { ScreenSharingSetting() }
+            SettingsPage.Shizuku -> item { ShizukuExplainer() }
             SettingsPage.Choices -> item { AppChoicesList() }
             SettingsPage.Permissions -> {
                 item { PermissionSteps(grants) }
                 item {
-                    if (BatteryOptimizationPrompt.isOneUi()) {
-                        TextButton(onClick = { BatteryOptimizationPrompt.openOneUiSleepingApps(context) }) {
-                            Text("Samsung: keep Baton out of sleeping apps")
-                        }
-                    }
                     TextButton(onClick = {
                         context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
                     }) { Text("Allow display over other apps (instant open without accessibility)") }

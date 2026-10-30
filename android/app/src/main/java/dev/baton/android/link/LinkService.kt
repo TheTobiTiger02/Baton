@@ -206,7 +206,8 @@ class LinkService : Service() {
             if (endpoint == null && link != null) {
                 pairing = null
                 Link.setStatus(LinkStatus(if (trust.isPaired) LinkPhase.Offline else LinkPhase.Unpaired,
-                    "Couldn't reach ${link.pcName}. Make sure both devices are on the same Wi-Fi and Baton is open on the PC."))
+                    "Couldn't reach ${link.pcName}. Make sure Baton is open on the PC, and that both devices are on " +
+                        "the same Wi-Fi or both signed in to Tailscale."))
                 return@launch
             }
             if (endpoint == null) {
