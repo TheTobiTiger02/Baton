@@ -383,7 +383,6 @@ public sealed class WindowStreamService : IDisposable
         private string? _mutedProcess;
         private double? _restoreVolume;
         private static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(2);
-        private static readonly TimeSpan SlowRoundTrip = TimeSpan.FromMilliseconds(300);
         private int _stopped;
         private readonly BitrateLadder _bitrate = new(owner.Quality, owner._channels.IsRemote(deviceId), DateTimeOffset.UtcNow);
 
@@ -533,7 +532,13 @@ public sealed class WindowStreamService : IDisposable
         /// <summary>A slow echo means the link is filling up: step down before frames have to be dropped.</summary>
         public void MeasuredRoundTrip(TimeSpan time)
         {
-            if (time > SlowRoundTrip)
+            bool congested;
+            lock (_gate)
+            {
+                congested = _bitrate.Congested(time, DateTimeOffset.UtcNow);
+            }
+
+            if (congested)
             {
                 FellBehind();
             }

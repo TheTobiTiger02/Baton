@@ -80,6 +80,11 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".transfer.PcFilesActivity"
+            android:exported="false"
+            android:label="Files on your PC" />
+
+        <activity
             android:name=".ui.PullFromPcActivity"
             android:exported="false"
             android:excludeFromRecents="true"

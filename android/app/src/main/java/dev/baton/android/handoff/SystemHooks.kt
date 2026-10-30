@@ -1,6 +1,7 @@
 package dev.baton.android.handoff
 
 import android.accessibilityservice.AccessibilityService
+import android.app.ActivityManager
 import android.app.KeyguardManager
 import android.content.ComponentName
 import android.content.Context
@@ -204,14 +205,14 @@ class BatonAccessibilityService : AccessibilityService() {
 /** Starts activities from the background, which Android only allows in certain situations. */
 object Launcher {
     /**
-     * Starts [intent] directly when Baton may (its accessibility service is bound, or the phone is
-     * in use and Baton was granted "display over other apps"); otherwise posts a notification the
-     * user taps to continue. Returns true when the activity was started directly.
+     * Starts [intent] directly when Baton may (its accessibility service is bound, Baton is on
+     * screen, or the phone is in use and Baton was granted "display over other apps"); otherwise
+     * posts a notification the user taps to continue. Returns true when the activity was started directly.
      */
     fun start(context: Context, intent: Intent, title: String): Boolean {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val accessibility = BatonAccessibilityService.instance
-        val canStartDirectly = accessibility != null || Settings.canDrawOverlays(context)
+        val canStartDirectly = accessibility != null || onScreen() || Settings.canDrawOverlays(context)
         if (canStartDirectly && Presence.current(context) == PresenceState.Active) {
             val started = runCatching { (accessibility ?: context).startActivity(intent) }.isSuccess
             if (started) return true
@@ -220,6 +221,10 @@ object Launcher {
         BatonNotifications.continuePrompt(context, intent, title)
         return false
     }
+
+    /** Baton shows a window (its foreground service alone doesn't count), so Android lets it start activities. */
+    private fun onScreen(): Boolean = ActivityManager.RunningAppProcessInfo()
+        .also { ActivityManager.getMyMemoryState(it) }.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
 }
 
 object Presence {

@@ -23,6 +23,11 @@ public static class MessageTypes
     public const string FileUpload = "file.upload";
     public const string FileResult = "file.result";
 
+    // The PC's shared folders, browsed from a phone.
+    public const string FolderList = "folder.list";
+    public const string FolderListing = "folder.listing";
+    public const string FileFetch = "file.fetch";
+
     // A phone as the PC's remote.
     public const string PcControl = "pc.control";
     public const string PcState = "pc.state";

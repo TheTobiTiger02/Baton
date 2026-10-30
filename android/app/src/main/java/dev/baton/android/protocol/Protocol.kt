@@ -61,6 +61,9 @@ object MessageTypes {
     const val FILE_OFFER = "file.offer"
     const val FILE_UPLOAD = "file.upload"
     const val FILE_RESULT = "file.result"
+    const val FOLDER_LIST = "folder.list"
+    const val FOLDER_LISTING = "folder.listing"
+    const val FILE_FETCH = "file.fetch"
     const val PC_CONTROL = "pc.control"
     const val PC_STATE = "pc.state"
     const val NOTIFICATION_POSTED = "notification.posted"
@@ -229,6 +232,28 @@ data class FileUploadPayload(val transferId: String, val token: String)
 /** How a file arrived, told by the device that received it. */
 @Serializable
 data class FileResultPayload(val transferId: String, val ok: Boolean, val detail: String? = null)
+
+/** Asks what is in one of the PC's shared folders; a null [path] asks for the shared folders themselves. */
+@Serializable
+data class FolderListPayload(val requestId: String, val path: String? = null)
+
+/** A file or folder in a listing; [path] is the PC's own, to ask for it by. */
+@Serializable
+data class FolderEntry(val name: String, val path: String, val folder: Boolean, val size: Long, val modified: String)
+
+/** What is in a shared folder. [error] says why there is nothing, [truncated] that there is more than was sent. */
+@Serializable
+data class FolderListingPayload(
+    val requestId: String,
+    val path: String? = null,
+    val entries: List<FolderEntry> = emptyList(),
+    val error: String? = null,
+    val truncated: Boolean = false
+)
+
+/** Asks the PC for a file in a shared folder; it answers with a [FileOfferPayload]. */
+@Serializable
+data class FileFetchPayload(val path: String)
 
 /** A notification on this phone, for the PC to show. [code] is a one-time code found in it. */
 @Serializable

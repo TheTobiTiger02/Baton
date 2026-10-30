@@ -80,6 +80,21 @@ public sealed record FileUploadPayload(string TransferId, string Token);
 /// <summary>How a file arrived, told by the device that received it.</summary>
 public sealed record FileResultPayload(string TransferId, bool Ok, string? Detail = null);
 
+/// <summary>A phone asks what is in one of the PC's shared folders; a null <see cref="Path"/> asks for the shared folders themselves.</summary>
+public sealed record FolderListPayload(string RequestId, string? Path = null);
+
+/// <summary>A file or folder in a listing. <see cref="Path"/> is the PC's own, to ask for it by.</summary>
+public sealed record FolderEntry(string Name, string Path, bool Folder, long Size, DateTimeOffset Modified);
+
+/// <summary>
+/// The answer to a <see cref="FolderListPayload"/>. <see cref="Error"/> says why there is nothing,
+/// and <see cref="Truncated"/> that the folder holds more than was sent.
+/// </summary>
+public sealed record FolderListingPayload(string RequestId, string? Path, IReadOnlyList<FolderEntry> Entries, string? Error = null, bool Truncated = false);
+
+/// <summary>A phone asks for a file in a shared folder; the PC answers with a <see cref="FileOfferPayload"/>.</summary>
+public sealed record FileFetchPayload(string Path);
+
 /// <summary>A phone's notification, for the PC to show. <see cref="Code"/> is a one-time code found in it.</summary>
 public sealed record NotificationPayload(
     string Key,

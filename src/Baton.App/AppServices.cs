@@ -36,6 +36,7 @@ internal sealed class AppServices : IDisposable
         Runtime.DefaultPhone = () => UserSettings.LastTargetDeviceId;
         Clipboard = new Mirror.ClipboardBridge(Host, app.Dispatcher) { AlwaysOn = UserSettings.SyncClipboard };
         Notifications = new PhoneNotificationCenter(Host, app.Dispatcher, NameOf) { Enabled = UserSettings.ShowPhoneNotifications };
+        Host.Transfers.Shared.Roots = UserSettings.SharedFolders;
         Host.WindowStreams.Quality = UserSettings.StreamQuality;
         Host.WindowStreams.StreamAudio = UserSettings.StreamAudio;
         Host.WindowStreams.SessionChanged += (deviceId, title, started) =>
@@ -75,6 +76,17 @@ internal sealed class AppServices : IDisposable
         get => Clipboard.AlwaysOn;
         set => Clipboard.AlwaysOn = UserSettings.SyncClipboard = value;
     }
+    /// <summary>The folders phones may browse.</summary>
+    public IReadOnlyList<string> SharedFolders
+    {
+        get => Host.Transfers.Shared.Roots;
+        set
+        {
+            Host.Transfers.Shared.Roots = value;
+            UserSettings.SharedFolders = Host.Transfers.Shared.Roots;
+        }
+    }
+
     public IReadOnlyList<string> HotkeyProblems { get; private set; } = [];
 
     public async Task StartAsync(bool showWindow)

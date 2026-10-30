@@ -21,6 +21,7 @@ public partial class MainWindow : Window
         ShortcutToggle.IsChecked = WelcomeShortcut.IsChecked = DesktopShortcut.Exists;
         SuggestToggle.IsChecked = UserSettings.SuggestOnReturn;
         ClipboardToggle.IsChecked = services.SyncClipboard;
+        SharedFoldersList.ItemsSource = services.SharedFolders;
         OpenFilesToggle.IsChecked = UserSettings.OpenReceivedFiles;
         NotificationsToggle.IsChecked = services.ShowPhoneNotifications;
         ShowHotkeyProblems();
@@ -285,6 +286,25 @@ public partial class MainWindow : Window
 
     private void OpenFilesToggle_Click(object sender, RoutedEventArgs e) =>
         UserSettings.OpenReceivedFiles = OpenFilesToggle.IsChecked == true;
+
+    private void AddSharedFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "Share a folder with your phones", Multiselect = true };
+        if (dialog.ShowDialog(this) == true)
+        {
+            _services.SharedFolders = [.. _services.SharedFolders, .. dialog.FolderNames];
+            SharedFoldersList.ItemsSource = _services.SharedFolders;
+        }
+    }
+
+    private void RemoveSharedFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string folder })
+        {
+            _services.SharedFolders = _services.SharedFolders.Where(shared => shared != folder).ToArray();
+            SharedFoldersList.ItemsSource = _services.SharedFolders;
+        }
+    }
 
     private async void SendFiles_Click(object sender, RoutedEventArgs e)
     {
