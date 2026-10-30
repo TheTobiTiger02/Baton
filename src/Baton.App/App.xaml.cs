@@ -45,6 +45,16 @@ public partial class App : Application
         base.OnStartup(e);
 
         _services = new AppServices(this);
+
+        // Sleep ends every phone's socket; the log shows that next to the drops it causes.
+        SystemEvents.PowerModeChanged += (_, args) =>
+        {
+            if (args.Mode is PowerModes.Suspend or PowerModes.Resume)
+            {
+                _services?.Host.Diagnostics.Record(Baton.Host.DiagnosticsCategory.Transport,
+                    args.Mode == PowerModes.Suspend ? "pc.suspend" : "pc.resume");
+            }
+        };
         try
         {
             await _services.StartAsync(showWindow: !startHidden);

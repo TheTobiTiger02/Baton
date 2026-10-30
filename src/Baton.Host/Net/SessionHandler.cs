@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
@@ -26,9 +27,13 @@ internal sealed class SessionHandler(BatonHost host)
             Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant(),
             host.Identity.HostId,
             host.Identity.PcName,
-            DateTimeOffset.UtcNow.Add(ChallengeLifetime)));
+            DateTimeOffset.UtcNow.Add(ChallengeLifetime)))
+        {
+            Path = DescribePath(context.Connection.RemoteIpAddress)
+        };
         await SendDirectAsync(socket, MessageTypes.SessionChallenge, connection.Challenge, cancellation);
 
+        string? failure = null;
         try
         {
             while (socket.State == WebSocketState.Open && !cancellation.IsCancellationRequested)
@@ -49,17 +54,29 @@ internal sealed class SessionHandler(BatonHost host)
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
+            failure = "request aborted";
         }
         catch (WebSocketException ex)
         {
+            failure = "network error";
             host.Diagnostics.Record(DiagnosticsCategory.Transport, "session.dropped", ex.Message, connection.DeviceId);
         }
         finally
         {
-            if (connection.DeviceId is not null && host.Sessions.Detach(connection.DeviceId, socket))
+            if (connection.DeviceId is { } deviceId)
             {
-                host.Diagnostics.Record(DiagnosticsCategory.Transport, "session.closed", deviceId: connection.DeviceId);
-                host.OnDeviceDisconnected(connection.DeviceId);
+                host.Sessions.Detach(deviceId, socket);
+
+                // The hub can have dropped the session already (closed as stale, or its writer
+                // failed); the phone has still left unless a newer socket took its place.
+                if (!host.Sessions.HasSession(deviceId))
+                {
+                    var reason = failure ?? (socket.CloseStatus is { } status ? $"closed by phone ({status})" : "ended");
+                    host.Diagnostics.Record(DiagnosticsCategory.Transport, "session.closed",
+                        $"{reason}, {connection.Path}, after {Describe(DateTimeOffset.UtcNow - connection.ReadyAt)}", deviceId);
+                    host.Diagnostics.MarkDisconnected(reason);
+                    host.OnDeviceDisconnected(deviceId);
+                }
             }
         }
     }
@@ -224,9 +241,37 @@ internal sealed class SessionHandler(BatonHost host)
 
         // Every address this PC answers on, so the phone can find it again after the LAN changes.
         await WebSocketSessionHub.SendAsync(socket, host.Endpoints.CreateEnvelope(), cancellation);
-        host.Diagnostics.Record(DiagnosticsCategory.Transport, "session.ready", deviceId: deviceId);
+        connection.ReadyAt = DateTimeOffset.UtcNow;
+        host.Diagnostics.Record(DiagnosticsCategory.Transport, "session.ready", connection.Path, deviceId);
+        host.Diagnostics.MarkConnected();
         host.OnDeviceConnected(deviceId);
     }
+
+    /// <summary>Which way the phone reached this PC, for telling LAN drops from Tailscale ones.</summary>
+    private static string DescribePath(IPAddress? remote)
+    {
+        if (remote is null)
+        {
+            return "unknown path";
+        }
+
+        if (remote.IsIPv4MappedToIPv6)
+        {
+            remote = remote.MapToIPv4();
+        }
+
+        var kind = IPAddress.IsLoopback(remote) ? "local"
+            : EndpointEnumerator.IsTailscale(remote) ? EndpointEnumerator.KindTailscale
+            : "lan";
+        return $"{kind} {remote}";
+    }
+
+    private static string Describe(TimeSpan length) => length.TotalMinutes switch
+    {
+        < 2 => $"{(int)length.TotalSeconds} s",
+        < 120 => $"{(int)length.TotalMinutes} min",
+        _ => $"{(int)length.TotalHours} h"
+    };
 
     private Task SendDirectAsync<T>(WebSocket socket, string type, T payload, CancellationToken cancellation) =>
         WebSocketSessionHub.SendAsync(socket, Envelope.Create(type, host.Identity.HostId, payload), cancellation);
@@ -275,5 +320,7 @@ internal sealed class SessionHandler(BatonHost host)
         public SessionChallengePayload Challenge { get; } = challenge;
         public string? DeviceId { get; set; }
         public long Generation { get; set; }
+        public string Path { get; init; } = "unknown path";
+        public DateTimeOffset ReadyAt { get; set; } = DateTimeOffset.UtcNow;
     }
 }

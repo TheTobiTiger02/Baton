@@ -25,6 +25,14 @@ class AutoConnectReceiver : BroadcastReceiver() {
         ConnectionWatchdog.schedule(context)
         if (action == ConnectionWatchdog.ACTION_WATCHDOG && Link.isReady) return
 
+        // A watchdog tick that finds no link usually means Android killed the process meanwhile.
+        LinkDiagnostics.init(context)
+        LinkDiagnostics.record(when (action) {
+            Intent.ACTION_BOOT_COMPLETED -> "wake.boot"
+            Intent.ACTION_MY_PACKAGE_REPLACED -> "wake.updated"
+            else -> "wake.watchdog"
+        }, LinkDiagnostics.powerSummary(context))
+
         runCatching { LinkService.start(context) }
             .onFailure { Log.w("BatonBoot", "Automatic reconnect could not start yet.", it) }
     }

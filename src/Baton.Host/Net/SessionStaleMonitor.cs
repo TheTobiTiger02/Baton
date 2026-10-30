@@ -6,6 +6,7 @@ namespace Baton.Host;
 
 public sealed class SessionStaleMonitor(
     WebSocketSessionHub sessions,
+    DiagnosticsLog diagnostics,
     ILogger<SessionStaleMonitor> logger) : BackgroundService
 {
     public static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(20);
@@ -19,9 +20,15 @@ public sealed class SessionStaleMonitor(
             var closed = await sessions.CloseStaleAsync(
                 DateTimeOffset.UtcNow.Subtract(StaleAfter),
                 stoppingToken);
-            if (closed > 0)
+            foreach (var deviceId in closed)
             {
-                logger.LogInformation("Closed {Count} stale Baton session(s).", closed);
+                diagnostics.Record(DiagnosticsCategory.Transport, "session.stale",
+                    $"no traffic for {StaleAfter.TotalSeconds:0} s", deviceId, DiagnosticsSeverity.Warning);
+            }
+
+            if (closed.Count > 0)
+            {
+                logger.LogInformation("Closed {Count} stale Baton session(s).", closed.Count);
             }
         }
     }

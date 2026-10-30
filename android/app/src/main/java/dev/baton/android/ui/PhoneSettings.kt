@@ -1,11 +1,17 @@
 package dev.baton.android.ui
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
@@ -30,10 +36,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.baton.android.BatonSettings
 import dev.baton.android.BatonSettings.MirrorMode
 import dev.baton.android.handoff.BatonAccessibilityService
+import dev.baton.android.link.LinkDiagnostics
+import dev.baton.android.link.LinkEvent
 import dev.baton.android.mirror.PhoneMirror
 import dev.baton.android.mirror.ShizukuAccess
 
@@ -170,3 +179,50 @@ private fun ModeOption(selected: Boolean, title: String, description: String, on
         }
     }
 }
+
+/** The link log: why the connection dropped, with a report to copy or share. */
+@Composable
+fun LinkDiagnosticsSetting() {
+    val context = LocalContext.current
+    remember { LinkDiagnostics.init(context) }
+    val events by LinkDiagnostics.events.collectAsStateWithLifecycle()
+    var copied by remember { mutableStateOf(false) }
+    val causes = remember(events) { LinkEvent.causes(events, System.currentTimeMillis() - 24L * 60L * 60L * 1000L) }
+
+    SettingsCardColumn {
+        Text("Connection log", style = MaterialTheme.typography.titleMedium)
+        Text("Every connect, drop, network change and Doze change on this phone. It stays on this phone until you " +
+            "copy or share the report.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(Tokens.Space3))
+        Text(if (causes.isEmpty()) "No drops in the last 24 hours."
+            else "Drops in the last 24 hours: " + causes.joinToString(", ") { "${it.first} ×${it.second}" },
+            style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(Tokens.Space3))
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space2)) {
+            Button(onClick = {
+                context.getSystemService(ClipboardManager::class.java)
+                    .setPrimaryClip(ClipData.newPlainText("Baton link report", LinkDiagnostics.report(context)))
+                copied = true
+            }) { Text(if (copied) "Copied" else "Copy report") }
+            OutlinedButton(onClick = {
+                val send = Intent(Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(Intent.EXTRA_SUBJECT, "Baton link report")
+                    .putExtra(Intent.EXTRA_TEXT, LinkDiagnostics.report(context))
+                context.startActivity(Intent.createChooser(send, "Share link report"))
+            }) { Text("Share") }
+            TextButton(onClick = { LinkDiagnostics.clear() }) { Text("Clear") }
+        }
+        if (events.isNotEmpty()) {
+            HorizontalDivider(Modifier.padding(vertical = Tokens.Space3))
+            events.sortedByDescending { it.lastAt }.take(RECENT_EVENTS).forEach {
+                Text(LinkDiagnostics.line(it), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace,
+                    color = if (it.event.startsWith("drop.") || LinkEvent.isUnexpectedExit(it)) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 2.dp))
+            }
+        }
+    }
+}
+
+private const val RECENT_EVENTS = 40

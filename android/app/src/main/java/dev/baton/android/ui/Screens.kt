@@ -727,6 +727,7 @@ private enum class SettingsPage(val title: String, val summary: String) {
     Sharing("Showing this phone", "How your PC shows this phone's screen"),
     Choices("App choices", "Which app opens what you continue"),
     Permissions("Permissions", "What Baton is allowed to do"),
+    Diagnostics("Diagnostics", "Connection log, to find out why the link drops"),
     About("About", "Your PC, version and updates")
 }
 
@@ -785,6 +786,7 @@ fun SettingsScreen(trust: TrustStore, grants: Grants, onBack: (() -> Unit)?) {
                     }) { Text("Allow display over other apps (instant open without accessibility)") }
                 }
             }
+            SettingsPage.Diagnostics -> item { LinkDiagnosticsSetting() }
             SettingsPage.About -> {
               item {
                 Card(shape = RoundedCornerShape(Tokens.CardRadius),

@@ -318,8 +318,19 @@ public partial class MainWindow : Window
 
     private void CopyLog_Click(object sender, RoutedEventArgs e)
     {
+        var host = _services.Host;
         var text = new StringBuilder();
-        foreach (var entry in _services.Host.Diagnostics.Snapshot())
+        text.AppendLine($"Baton {_services.Updates.CurrentVersion}, {Environment.OSVersion.VersionString}, {DateTimeOffset.Now:O}");
+        foreach (var session in host.Sessions.GetStatuses())
+        {
+            text.AppendLine($"Connected: {host.NameOf(session.SessionId) ?? session.SessionId} since {session.AttachedAt.ToLocalTime():T}, " +
+                $"last heard {session.LastActivityAt.ToLocalTime():T}, {session.DroppedMessages} messages dropped");
+        }
+
+        var reasons = host.Diagnostics.ReconnectReasons();
+        text.AppendLine("Session ends: " + (reasons.Count == 0 ? "none" : string.Join(", ", reasons.Select(pair => $"{pair.Key} ×{pair.Value}"))));
+        text.AppendLine();
+        foreach (var entry in host.Diagnostics.Snapshot())
         {
             text.AppendLine($"{entry.Timestamp:O} {entry.Severity,-7} {entry.Category,-9} {entry.Event} {entry.DeviceId} {entry.Detail}");
         }
