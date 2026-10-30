@@ -54,7 +54,7 @@ public sealed class MediaChannelHub(StreamTicketStore tickets, DiagnosticsLog di
     {
         var streamId = (ulong)Interlocked.Increment(ref _nextStreamId);
         var ticket = tickets.Issue(deviceId, "media", streamId, StreamKind.Media);
-        return new MediaChannelPayload(Convert.ToBase64String(ticket.Value), streamId, HostIdentity.StreamPort);
+        return new MediaChannelPayload(Convert.ToBase64String(ticket.Value), streamId, HostIdentity.StreamPort, [Baton.Media.OpusAudio.Codec]);
     }
 
     public async Task AcceptAsync(StreamConnection connection, CancellationToken cancellationToken)

@@ -59,6 +59,9 @@ object StreamProtocol {
     const val FLAG_KEYFRAME: Int = 1 shl 1
     const val FLAG_FORMAT_CHANGE: Int = 1 shl 2
 
+    /** An audio record holding one Opus packet instead of PCM. */
+    const val FLAG_OPUS: Int = 1 shl 3
+
     fun encodeHandshake(kind: Int, ticket: ByteArray, streamId: Long): ByteArray {
         require(ticket.size == TICKET_BYTES) { "Ticket must be $TICKET_BYTES bytes, was ${ticket.size}." }
         require(kind in KIND_VIDEO..KIND_MEDIA) { "Unknown stream kind $kind." }
@@ -171,6 +174,7 @@ object StreamProtocol {
         val isCodecConfig: Boolean get() = flags and FLAG_CODEC_CONFIG != 0
         val isKeyframe: Boolean get() = flags and FLAG_KEYFRAME != 0
         val isFormatChange: Boolean get() = flags and FLAG_FORMAT_CHANGE != 0
+        val isOpus: Boolean get() = flags and FLAG_OPUS != 0
     }
 }
 

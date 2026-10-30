@@ -34,6 +34,7 @@ internal sealed class PhoneWindow : Window
     private NV12Presenter? _presenter;
     private VideoDecoder? _decoder;
     private AudioStreamPlayer? _audio;
+    private OpusAudioDecoder? _opus;
     private byte[]? _codecConfig;
     private int _videoWidth, _videoHeight;
     private bool _firstFrame;
@@ -82,6 +83,9 @@ internal sealed class PhoneWindow : Window
         _host.MediaChannels.RecordReceived += OnRecord;
         _host.MediaChannels.ChannelChanged += OnChannelChanged;
         Closed += (_, _) => Shutdown();
+
+        // Minimized, nobody sees the phone: it stops encoding until the window is back.
+        StateChanged += (_, _) => Send(new VisibilityMessage(WindowState != WindowState.Minimized));
 
         // Typing goes to the phone as soon as the window is in front, without clicking into it first.
         Activated += (_, _) => FocusSurface();
@@ -178,7 +182,9 @@ internal sealed class PhoneWindow : Window
                     OnVideo(header, payload);
                     break;
                 case StreamChannel.Audio:
-                    (_audio ??= new AudioStreamPlayer()).Submit(payload);
+                    // A phone that knows this PC plays Opus sends that; older phones send PCM.
+                    var pcm = header.Flags.HasFlag(StreamRecordFlags.Opus) ? (_opus ??= new OpusAudioDecoder()).Decode(payload) : payload;
+                    (_audio ??= new AudioStreamPlayer()).Submit(pcm);
                     break;
                 case StreamChannel.Meta:
                     OnMeta(payload);
@@ -452,5 +458,7 @@ internal sealed class PhoneWindow : Window
 
         _audio?.Dispose();
         _audio = null;
+        _opus?.Dispose();
+        _opus = null;
     }
 }

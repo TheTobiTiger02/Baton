@@ -361,7 +361,8 @@ class LinkService : Service() {
             getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
                 .let { minOf(it.width(), it.height()) to maxOf(it.width(), it.height()) }
         }.getOrDefault(screen)
-        Link.send(MessageTypes.DEVICE_INFO, DeviceInfoPayload(trust.displayName, trust.model, screenWidth = real.first, screenHeight = real.second))
+        Link.send(MessageTypes.DEVICE_INFO, DeviceInfoPayload(trust.displayName, trust.model, screenWidth = real.first, screenHeight = real.second,
+            audioCodecs = dev.baton.android.stream.OpusAudio.decodable))
         // One media socket for the whole session, so streams start without a handshake.
         Link.send(MessageTypes.MEDIA_CHANNEL, kotlinx.serialization.json.JsonObject(emptyMap()))
         main.removeCallbacks(heartbeat)

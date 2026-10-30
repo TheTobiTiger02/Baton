@@ -1,5 +1,6 @@
 package dev.baton.android.ui
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.Image
@@ -41,7 +42,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -114,7 +114,7 @@ object ChoicePrompt {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChoiceSheetHost() {
-    val request by ChoicePrompt.request.collectAsState()
+    val request by ChoicePrompt.request.collectAsStateWithLifecycle()
     val current = request ?: return
     var selected by remember(current) { mutableStateOf(current.preselected) }
     var remember by remember(current) { mutableStateOf(true) }
@@ -221,7 +221,7 @@ fun AppPickerSheet(onDismiss: () -> Unit, onPick: (InstalledApp) -> Unit) {
 /** The remembered choices, each removable (the next handoff of that app asks again). */
 @Composable
 fun AppChoicesList() {
-    val preferences by Choices.preferences.collectAsState()
+    val preferences by Choices.preferences.collectAsStateWithLifecycle()
     if (preferences.isEmpty()) {
         EmptyCard("No app choices yet. The first time you continue an app, Baton asks where it should open and remembers it.")
         return

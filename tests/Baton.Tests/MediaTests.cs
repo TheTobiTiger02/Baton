@@ -35,7 +35,48 @@ public class MediaTests
         { "0901", new RotateMessage(1) },
         { "0BFFFFFFFB0000000C", new MouseMoveMessage(-5, 12) },
         { "0C0201", new MouseButtonMessage(MouseButton.Right, KeyAction.Up) },
+        { "0E00", new VisibilityMessage(false) },
+        { "0E01", new VisibilityMessage(true) },
     };
+
+    [Fact]
+    public void OpusCarriesStreamAudioAtATenthOfThePcmBitrate()
+    {
+        // One second of a 440 Hz tone, fed in the uneven chunks WASAPI hands out.
+        const int samples = OpusAudio.SampleRate;
+        var pcm = new byte[samples * OpusAudio.Channels * sizeof(short)];
+        for (var i = 0; i < samples; i++)
+        {
+            var value = (short)(Math.Sin(2 * Math.PI * 440 * i / OpusAudio.SampleRate) * 12_000);
+            BitConverter.TryWriteBytes(pcm.AsSpan(i * 4), value);
+            BitConverter.TryWriteBytes(pcm.AsSpan(i * 4 + 2), value);
+        }
+
+        using var encoder = new OpusAudioEncoder();
+        using var decoder = new OpusAudioDecoder();
+        var packets = new List<byte[]>();
+        for (var offset = 0; offset < pcm.Length; offset += 1_764)
+        {
+            encoder.Encode(pcm.AsSpan(offset, Math.Min(1_764, pcm.Length - offset)), packets.Add);
+        }
+
+        Assert.Equal(50, packets.Count);
+        var bitsPerSecond = packets.Sum(packet => packet.Length) * 8;
+        Assert.InRange(bitsPerSecond, 100_000, 200_000);
+
+        var decoded = packets.SelectMany(packet => decoder.Decode(packet)).ToArray();
+        Assert.Equal(pcm.Length, decoded.Length);
+
+        // Past the codec's start-up, the tone comes back close to what went in (the delay is
+        // under a few milliseconds, so compare the strength rather than sample by sample).
+        static double Rms(byte[] audio, int from) =>
+            Math.Sqrt(Enumerable.Range(from, 9_600).Average(i => Math.Pow(BitConverter.ToInt16(audio, i * 4), 2)));
+        Assert.InRange(Rms(decoded, 24_000) / Rms(pcm, 24_000), 0.9, 1.1);
+    }
+
+    [Fact]
+    public void OpusDecoderIgnoresGarbage() =>
+        Assert.Empty(new OpusAudioDecoder().Decode([0xFF, 0xFF, 0xFF]));
 
     [Theory]
     [MemberData(nameof(ControlVectors))]

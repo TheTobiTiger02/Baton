@@ -65,6 +65,16 @@ object Link {
     var pcFingerprint: String = ""
         internal set
 
+    /**
+     * Whether the PC is reached from outside the home network (Tailscale, mobile data), where
+     * bandwidth costs: the twin of the PC's `BitrateLadder.IsRemote`.
+     */
+    val isRemote: Boolean
+        get() = runCatching {
+            val address = java.net.InetAddress.getByName(pcAddress.takeIf { it.isNotBlank() } ?: return false)
+            !(address.isSiteLocalAddress || address.isLinkLocalAddress || address.isLoopbackAddress)
+        }.getOrDefault(false)
+
     val status: StateFlow<LinkStatus> = statusFlow.asStateFlow()
     val peers: StateFlow<List<PeerInfo>> = peersFlow.asStateFlow()
     val notices: SharedFlow<HandoffNotice> = noticesFlow.asSharedFlow()

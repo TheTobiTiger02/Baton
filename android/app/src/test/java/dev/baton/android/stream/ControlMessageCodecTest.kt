@@ -20,6 +20,8 @@ class ControlMessageCodecTest {
         "0901" to ControlMessageCodec.rotate(1),
         "0BFFFFFFFB0000000C" to ControlMessageCodec.mouseMove(-5, 12),
         "0C0201" to ControlMessageCodec.mouseButton(ControlMessageCodec.BUTTON_RIGHT, ControlMessageCodec.KEY_UP),
+        "0E00" to ControlMessageCodec.visibility(false),
+        "0E01" to ControlMessageCodec.visibility(true),
     )
 
     @Test
@@ -35,6 +37,8 @@ class ControlMessageCodecTest {
         assertEquals(ControlMessage.Text("hé"), ControlMessageCodec.decode(bytes(vectors[3].first)))
         assertEquals(ControlMessage.Clipboard("hé"), ControlMessageCodec.decode(bytes(vectors[4].first)))
         assertEquals(ControlMessage.MouseMove(-5, 12), ControlMessageCodec.decode(bytes(vectors[8].first)))
+        assertEquals(ControlMessage.Visibility(false), ControlMessageCodec.decode(bytes(vectors[10].first)))
+        assertEquals(ControlMessage.Visibility(true), ControlMessageCodec.decode(bytes(vectors[11].first)))
     }
 
     @Test

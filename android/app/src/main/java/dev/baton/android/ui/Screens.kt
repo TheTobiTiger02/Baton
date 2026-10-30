@@ -1,5 +1,7 @@
 package dev.baton.android.ui
 
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.baton.android.apps.Choices
 import dev.baton.android.apps.AppCatalog
 import dev.baton.android.apps.AppUpdates
@@ -69,7 +71,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -134,11 +135,14 @@ data class Grants(
 private fun rememberGrants(): Grants {
     val context = LocalContext.current
     var grants by remember { mutableStateOf(Grants.read(context)) }
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { grants = Grants.read(context) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(1_500)
-            grants = Grants.read(context)
+    // Re-read while visible only: each read asks the system about every permission.
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                grants = Grants.read(context)
+                delay(1_500)
+            }
         }
     }
     return grants
@@ -146,7 +150,7 @@ private fun rememberGrants(): Grants {
 
 @Composable
 fun BatonApp(trust: TrustStore) {
-    val status by Link.status.collectAsState()
+    val status by Link.status.collectAsStateWithLifecycle()
     val paired = remember(status) { trust.isPaired }
     var showSettings by remember { mutableStateOf(false) }
     var setupDone by remember { mutableStateOf(false) }
@@ -197,7 +201,7 @@ private fun updateTexts(state: AppUpdates.State): Pair<String, String> = when (s
 private fun UpdateCard() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state by AppUpdates.state.collectAsState()
+    val state by AppUpdates.state.collectAsStateWithLifecycle()
     val (label, line) = updateTexts(state)
     Card(shape = RoundedCornerShape(Tokens.CardRadius),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
@@ -335,7 +339,7 @@ private fun TourCard(icon: androidx.compose.ui.graphics.vector.ImageVector, titl
 private fun PairScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val status by Link.status.collectAsState()
+    val status by Link.status.collectAsStateWithLifecycle()
     var pcs by remember { mutableStateOf<List<DiscoveredPc>>(emptyList()) }
     var searching by remember { mutableStateOf(true) }
     var chosen by remember { mutableStateOf<DiscoveredPc?>(null) }
@@ -467,18 +471,18 @@ private fun CodeDialog(pc: DiscoveredPc, onDismiss: () -> Unit, onPair: (String)
 
 @Composable
 private fun HomeScreen(grants: Grants, onSettings: (() -> Unit)?) {
-    val status by Link.status.collectAsState()
-    val peers by Link.peers.collectAsState()
-    val local by HandoffEngine.local.collectAsState()
+    val status by Link.status.collectAsStateWithLifecycle()
+    val peers by Link.peers.collectAsStateWithLifecycle()
+    val local by HandoffEngine.local.collectAsStateWithLifecycle()
     val pc = peers.firstOrNull { it.kind == "pc" }
     val otherPhones = peers.filter { it.kind != "pc" && it.online }
     val ready = status.phase == LinkPhase.Ready
     var notice by remember { mutableStateOf<HandoffNotice?>(null) }
     var pickApp by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
-    val updateState by AppUpdates.state.collectAsState()
+    val updateState by AppUpdates.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    val preferences by Choices.preferences.collectAsState()
+    val preferences by Choices.preferences.collectAsStateWithLifecycle()
     val context = LocalContext.current
     if (pickApp) {
         AppPickerSheet(onDismiss = { pickApp = false }, onPick = { app ->
@@ -670,10 +674,10 @@ private fun NoticeBanner(notice: HandoffNotice) {
 
 @Composable
 private fun RecentHandoffs() {
-    val records by HandoffEngine.history.recent.collectAsState()
-    val peers by Link.peers.collectAsState()
-    val local by HandoffEngine.local.collectAsState()
-    val status by Link.status.collectAsState()
+    val records by HandoffEngine.history.recent.collectAsStateWithLifecycle()
+    val peers by Link.peers.collectAsStateWithLifecycle()
+    val local by HandoffEngine.local.collectAsStateWithLifecycle()
+    val status by Link.status.collectAsStateWithLifecycle()
     var expanded by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     fun name(id: String) = if (id == Link.deviceId) "This phone" else peers.firstOrNull { it.deviceId == id }?.name ?: "Unavailable device"

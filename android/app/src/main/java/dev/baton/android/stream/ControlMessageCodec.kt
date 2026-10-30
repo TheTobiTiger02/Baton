@@ -21,6 +21,7 @@ object ControlMessageCodec {
     const val TYPE_MOUSE_MOVE = 0x0B
     const val TYPE_MOUSE_BUTTON = 0x0C
     const val TYPE_CLIPBOARD = 0x0D
+    const val TYPE_VISIBILITY = 0x0E
 
     const val TOUCH_DOWN = 0
     const val TOUCH_UP = 1
@@ -111,6 +112,9 @@ object ControlMessageCodec {
     fun mouseButton(button: Int, action: Int): ByteArray =
         byteArrayOf(TYPE_MOUSE_BUTTON.toByte(), button.toByte(), action.toByte())
 
+    /** The viewer stopped or started showing the picture; the sender pauses video meanwhile. */
+    fun visibility(visible: Boolean): ByteArray = byteArrayOf(TYPE_VISIBILITY.toByte(), if (visible) 1 else 0)
+
     fun decode(bytes: ByteArray): ControlMessage {
         require(bytes.isNotEmpty()) { "Empty control message." }
         val body = ByteBuffer.wrap(bytes, 1, bytes.size - 1).order(ByteOrder.BIG_ENDIAN)
@@ -140,6 +144,7 @@ object ControlMessageCodec {
             TYPE_ROTATE -> ControlMessage.Rotate(body.get().toInt() and 0xFF)
             TYPE_MOUSE_MOVE -> ControlMessage.MouseMove(body.int, body.int)
             TYPE_MOUSE_BUTTON -> ControlMessage.MouseButton(body.get().toInt() and 0xFF, body.get().toInt() and 0xFF)
+            TYPE_VISIBILITY -> ControlMessage.Visibility(body.get().toInt() != 0)
             else -> throw IllegalArgumentException("Unknown control message type 0x${(bytes[0].toInt() and 0xFF).toString(16)}.")
         }
     }
@@ -166,4 +171,5 @@ sealed interface ControlMessage {
     data class MouseMove(val dx: Int, val dy: Int) : ControlMessage
     data class MouseButton(val button: Int, val action: Int) : ControlMessage
     data class Clipboard(val value: String) : ControlMessage
+    data class Visibility(val visible: Boolean) : ControlMessage
 }

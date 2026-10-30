@@ -101,7 +101,7 @@ object MediaActions {
 }
 
 @Serializable
-data class MediaChannelPayload(val ticket: String, val streamId: Long, val port: Int)
+data class MediaChannelPayload(val ticket: String, val streamId: Long, val port: Int, val audioCodecs: List<String>? = null)
 
 @Serializable
 data class StreamControlPayload(val sessionId: String, val action: String, val elapsedMs: Long? = null)
@@ -193,7 +193,9 @@ data class DeviceInfoPayload(
     val model: String,
     val batteryLevel: Int? = null,
     val screenWidth: Int? = null,
-    val screenHeight: Int? = null
+    val screenHeight: Int? = null,
+    /** Compressed audio this phone plays (`opus`); PCM always works. */
+    val audioCodecs: List<String>? = null
 )
 
 @Serializable

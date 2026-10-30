@@ -103,6 +103,7 @@ class StreamViewerActivity : Activity() {
     @Volatile private var decoderReady = false
     @Volatile private var closing = false
     private var audio: AudioTrack? = null
+    @Volatile private var opus: OpusDecoder? = null
     private val hideToolbar = Runnable { setToolbarVisible(false) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -124,7 +125,7 @@ class StreamViewerActivity : Activity() {
             onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT) { handleBack() }
         }
         MediaChannel.metaSink = MediaSink { _, payload -> main.post { onMeta(String(payload)) } }
-        MediaChannel.audioSink = MediaSink { _, payload -> playAudio(payload) }
+        MediaChannel.audioSink = MediaSink { header, payload -> playAudio(header, payload) }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -167,6 +168,8 @@ class StreamViewerActivity : Activity() {
         releaseDecoder()
         spareDecoder?.let { runCatching { it.release() } }
         runCatching { audio?.release() }
+        opus?.close()
+        opus = null
         if (!closingByUser && isFinishing) sendControl(StreamActions.STOP)
         super.onDestroy()
     }
@@ -197,12 +200,22 @@ class StreamViewerActivity : Activity() {
         surface.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
                 decoderSurface = holder.surface
+                // The PC sends at most 60 frames a second: a 120 Hz screen can run at 60 meanwhile.
+                if (android.os.Build.VERSION.SDK_INT >= 30) {
+                    runCatching { holder.surface.setFrameRate(STREAM_FPS, android.view.Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE) }
+                }
                 // Replaying buffered video starts the decoder: keep that off the UI thread.
-                Thread({ MediaChannel.attachVideo(MediaSink { header, payload -> onVideo(header, payload) }) }, "Baton viewer attach").start()
+                Thread({
+                    MediaChannel.attachVideo(MediaSink { header, payload -> onVideo(header, payload) })
+                    // Shown (again): the PC resumes video, starting from a keyframe.
+                    control(ControlMessageCodec.visibility(true))
+                }, "Baton viewer attach").start()
             }
 
             override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
             override fun surfaceDestroyed(holder: SurfaceHolder) {
+                // Home, another app or the screen turned off: the PC stops sending video, audio stays.
+                control(ControlMessageCodec.visibility(false))
                 MediaChannel.attachVideo(null)
                 releaseDecoder()
                 decoderSurface = null
@@ -516,7 +529,16 @@ class StreamViewerActivity : Activity() {
 
     private fun requestKeyframe() = MediaChannel.send(StreamProtocol.CHANNEL_CONTROL, ControlMessageCodec.keyframeRequest())
 
-    private fun playAudio(pcm: ByteArray) {
+    /** Runs on the media channel's reader thread. */
+    private fun playAudio(header: StreamProtocol.RecordHeader, payload: ByteArray) {
+        if (!header.isOpus) return writePcm(payload, payload.size)
+        if (closing) return
+        val decoder = opus ?: runCatching { OpusDecoder() }.getOrNull()?.also { opus = it } ?: return
+        runCatching { decoder.decode(payload) { pcm, size -> writePcm(pcm, size) } }
+            .onFailure { Log.w(TAG, "Opus decode failed: ${it.message}") }
+    }
+
+    private fun writePcm(pcm: ByteArray, size: Int) {
         val track = audio ?: AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MOVIE).build())
             .setAudioFormat(AudioFormat.Builder().setSampleRate(48_000).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
@@ -528,7 +550,7 @@ class StreamViewerActivity : Activity() {
                 audio = it
             }
         // Never block the channel's reader: if the track is full, this bit of sound is late anyway.
-        track.write(pcm, 0, pcm.size, AudioTrack.WRITE_NON_BLOCKING)
+        track.write(pcm, 0, size, AudioTrack.WRITE_NON_BLOCKING)
     }
 
     // ---- Input ----
@@ -860,6 +882,8 @@ class StreamViewerActivity : Activity() {
         private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         private const val TOOLBAR_MS = 4_000L
+        /** The PC's encoder runs at 60 frames a second (`H264Encoder.Create`). */
+        private const val STREAM_FPS = 60f
         private const val PC_META = KeyEvent.META_SHIFT_ON or KeyEvent.META_ALT_ON or KeyEvent.META_CTRL_ON or KeyEvent.META_META_ON
         private const val TAP_MS = 220L
         private const val DOUBLE_TAP_MS = 280L
