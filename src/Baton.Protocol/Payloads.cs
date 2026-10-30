@@ -76,6 +76,23 @@ public sealed record FileUploadPayload(string TransferId, string Token);
 /// <summary>How a file arrived, told by the device that received it.</summary>
 public sealed record FileResultPayload(string TransferId, bool Ok, string? Detail = null);
 
+/// <summary>A phone's notification, for the PC to show. <see cref="Code"/> is a one-time code found in it.</summary>
+public sealed record NotificationPayload(
+    string Key,
+    string AppId,
+    string AppName,
+    string Title,
+    string Text,
+    DateTimeOffset PostedAt,
+    bool CanReply = false,
+    string? Code = null);
+
+/// <summary>A notification by its key: gone from the phone, or dismissed on the PC.</summary>
+public sealed record NotificationKeyPayload(string Key);
+
+/// <summary>A reply typed on the PC, for the app that posted the notification.</summary>
+public sealed record NotificationReplyPayload(string Key, string Text);
+
 public sealed record DeviceForgetPayload(string? Reason = null);
 
 public sealed record ErrorPayload(string Code, string Message, string? CorrelationId = null);

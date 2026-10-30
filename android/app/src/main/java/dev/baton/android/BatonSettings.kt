@@ -12,6 +12,8 @@ object BatonSettings {
     private const val REVOKE_PENDING = "revoke_pending"
     private const val SWIPES = "swipes"
     private const val SWIPES_OFF_APPS = "swipes_off_apps"
+    private const val MIRROR_NOTIFICATIONS = "mirror_notifications"
+    private const val NOTIFICATIONS_OFF_APPS = "notifications_off_apps"
     /** How showing this phone on the PC gets Android's screen-sharing consent. */
     enum class MirrorMode {
         /** Android asks on every handoff. */
@@ -54,6 +56,16 @@ object BatonSettings {
     fun swipesOffApps(context: Context): Set<String> = prefs(context).getStringSet(SWIPES_OFF_APPS, null).orEmpty().toSet()
 
     fun setSwipesOffApps(context: Context, value: Set<String>) = prefs(context).edit().putStringSet(SWIPES_OFF_APPS, value).apply()
+
+    /** This phone's notifications show on the PC (while the phone isn't in use). */
+    fun mirrorNotifications(context: Context): Boolean = prefs(context).getBoolean(MIRROR_NOTIFICATIONS, true)
+
+    fun setMirrorNotifications(context: Context, value: Boolean) = prefs(context).edit().putBoolean(MIRROR_NOTIFICATIONS, value).apply()
+
+    /** Apps whose notifications stay on the phone. */
+    fun notificationsOffApps(context: Context): Set<String> = prefs(context).getStringSet(NOTIFICATIONS_OFF_APPS, null).orEmpty().toSet()
+
+    fun setNotificationsOffApps(context: Context, value: Set<String>) = prefs(context).edit().putStringSet(NOTIFICATIONS_OFF_APPS, value).apply()
 
     /** The Shizuku mode was left while Shizuku was stopped: its screen-sharing grant is still to be taken back. */
     internal fun revokePending(context: Context): Boolean = prefs(context).getBoolean(REVOKE_PENDING, false)

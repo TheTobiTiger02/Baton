@@ -22,6 +22,7 @@ public partial class MainWindow : Window
         SuggestToggle.IsChecked = UserSettings.SuggestOnReturn;
         ClipboardToggle.IsChecked = services.SyncClipboard;
         OpenFilesToggle.IsChecked = UserSettings.OpenReceivedFiles;
+        NotificationsToggle.IsChecked = services.ShowPhoneNotifications;
         ShowHotkeyProblems();
         Welcome.Visibility = UserSettings.Welcomed ? Visibility.Collapsed : Visibility.Visible;
         VersionText.Text = $"Baton {services.Updates.CurrentVersion}";
@@ -278,6 +279,9 @@ public partial class MainWindow : Window
 
     private void ClipboardToggle_Click(object sender, RoutedEventArgs e) =>
         _services.SyncClipboard = ClipboardToggle.IsChecked == true;
+
+    private void NotificationsToggle_Click(object sender, RoutedEventArgs e) =>
+        _services.ShowPhoneNotifications = NotificationsToggle.IsChecked == true;
 
     private void OpenFilesToggle_Click(object sender, RoutedEventArgs e) =>
         UserSettings.OpenReceivedFiles = OpenFilesToggle.IsChecked == true;

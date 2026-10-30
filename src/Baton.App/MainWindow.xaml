@@ -274,6 +274,14 @@
                             </Border>
 
                             <Border Style="{StaticResource SettingsCard}">
+                                <CheckBox x:Name="NotificationsToggle" Style="{StaticResource ToggleSwitch}" Click="NotificationsToggle_Click">
+                                    <StackPanel>
+                                        <TextBlock Text="Show phone notifications" Style="{StaticResource SettingsTitle}" />
+                                        <TextBlock Text="Your phones' notifications show here while you aren't using them. Reply or dismiss them here; a one-time code is copied for you. Which apps take part is chosen on each phone." Style="{StaticResource SettingsDescription}" />
+                                    </StackPanel>
+                                </CheckBox>
+                            </Border>
+                            <Border Style="{StaticResource SettingsCard}">
                                 <CheckBox x:Name="OpenFilesToggle" Style="{StaticResource ToggleSwitch}" Click="OpenFilesToggle_Click">
                                     <StackPanel>
                                         <TextBlock Text="Open files from phones" Style="{StaticResource SettingsTitle}" />

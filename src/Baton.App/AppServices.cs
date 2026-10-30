@@ -35,6 +35,7 @@ internal sealed class AppServices : IDisposable
         Shell.DefaultPhoneId = UserSettings.LastTargetDeviceId;
         Runtime.DefaultPhone = () => UserSettings.LastTargetDeviceId;
         Clipboard = new Mirror.ClipboardBridge(Host, app.Dispatcher) { AlwaysOn = UserSettings.SyncClipboard };
+        Notifications = new PhoneNotificationCenter(Host, app.Dispatcher, NameOf) { Enabled = UserSettings.ShowPhoneNotifications };
         Host.WindowStreams.Quality = UserSettings.StreamQuality;
         Host.WindowStreams.StreamAudio = UserSettings.StreamAudio;
         Host.WindowStreams.SessionChanged += (deviceId, title, started) =>
@@ -60,6 +61,14 @@ internal sealed class AppServices : IDisposable
 
     /// <summary>Copies travel between this PC and a phone while one shows the other.</summary>
     private Mirror.ClipboardBridge Clipboard { get; }
+
+    private PhoneNotificationCenter Notifications { get; }
+
+    public bool ShowPhoneNotifications
+    {
+        get => Notifications.Enabled;
+        set => Notifications.Enabled = UserSettings.ShowPhoneNotifications = value;
+    }
 
     public bool SyncClipboard
     {
@@ -381,6 +390,7 @@ internal sealed class AppServices : IDisposable
         _hotkeys?.Dispose();
         _tray?.Dispose();
         Clipboard.Dispose();
+        Notifications.Dispose();
         Runtime.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(3));
     }
 

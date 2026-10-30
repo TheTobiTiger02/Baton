@@ -23,14 +23,27 @@ import kotlinx.coroutines.withContext
  */
 class BatonNotificationListener : NotificationListenerService() {
     override fun onListenerConnected() {
+        instance = this
         MediaSessions.start(this, ComponentName(this, BatonNotificationListener::class.java))
     }
 
     override fun onListenerDisconnected() {
+        if (instance === this) instance = null
         MediaSessions.stop()
     }
 
+    override fun onNotificationPosted(sbn: android.service.notification.StatusBarNotification) =
+        dev.baton.android.notify.PhoneNotifications.onPosted(this, sbn)
+
+    override fun onNotificationRemoved(sbn: android.service.notification.StatusBarNotification) =
+        dev.baton.android.notify.PhoneNotifications.onRemoved(sbn)
+
     companion object {
+        /** The bound listener, to dismiss and reply to notifications for the PC. */
+        @Volatile
+        var instance: BatonNotificationListener? = null
+            private set
+
         fun isGranted(context: Context): Boolean =
             Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
                 ?.contains(ComponentName(context, BatonNotificationListener::class.java).flattenToString()) == true

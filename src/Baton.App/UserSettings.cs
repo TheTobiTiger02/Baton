@@ -14,6 +14,13 @@ internal static class UserSettings
         set => Write(nameof(SuggestOnReturn), value);
     }
 
+    /// <summary>Phones' notifications show on this PC.</summary>
+    public static bool ShowPhoneNotifications
+    {
+        get => Read(nameof(ShowPhoneNotifications), true);
+        set => Write(nameof(ShowPhoneNotifications), value);
+    }
+
     /// <summary>A file from a phone opens as soon as it arrives (documents, pictures and media only).</summary>
     public static bool OpenReceivedFiles
     {

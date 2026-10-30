@@ -22,6 +22,12 @@ public static class MessageTypes
     public const string FileOffer = "file.offer";
     public const string FileUpload = "file.upload";
     public const string FileResult = "file.result";
+
+    // Phones' notifications on the PC.
+    public const string NotificationPosted = "notification.posted";
+    public const string NotificationRemoved = "notification.removed";
+    public const string NotificationDismiss = "notification.dismiss";
+    public const string NotificationReply = "notification.reply";
     public const string Peers = "peers";
     public const string Error = "error";
 

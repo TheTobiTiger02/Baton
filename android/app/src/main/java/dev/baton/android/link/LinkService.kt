@@ -324,6 +324,9 @@ class LinkService : Service() {
                 BatonNotifications.updateLink(this)
             }
             MessageTypes.DEVICE_FORGOTTEN -> forgetLocally()
+            MessageTypes.NOTIFICATION_DISMISS ->
+                dev.baton.android.notify.PhoneNotifications.dismiss(envelope.read<dev.baton.android.protocol.NotificationKeyPayload>().key)
+            MessageTypes.NOTIFICATION_REPLY -> dev.baton.android.notify.PhoneNotifications.reply(this, envelope.read())
             MessageTypes.FILE_OFFER -> dev.baton.android.transfer.FileTransfers.onOffer(this, envelope.read())
             MessageTypes.FILE_UPLOAD -> dev.baton.android.transfer.FileTransfers.onUpload(this, envelope.read())
             MessageTypes.FILE_RESULT -> dev.baton.android.transfer.FileTransfers.onResult(this, envelope.read())
