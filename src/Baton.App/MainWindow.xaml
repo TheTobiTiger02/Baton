@@ -290,6 +290,27 @@
                                 </CheckBox>
                             </Border>
                             <Border Style="{StaticResource SettingsCard}">
+                                <StackPanel>
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" Content="Add folder" VerticalAlignment="Center" Click="AddSharedFolder_Click" />
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Shared folders" Style="{StaticResource SettingsTitle}" />
+                                            <TextBlock Text="Your phones can look through these folders and download what's in them, at home or away over Tailscale. They can't change or delete anything." Style="{StaticResource SettingsDescription}" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                    <ItemsControl x:Name="SharedFoldersList" Focusable="False" Margin="0,8,0,0">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <DockPanel Margin="0,4">
+                                                    <Button DockPanel.Dock="Right" Content="Stop sharing" VerticalAlignment="Center" Tag="{Binding}" Click="RemoveSharedFolder_Click" />
+                                                    <TextBlock Text="{Binding}" Style="{StaticResource SettingsDescription}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                </DockPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource SettingsCard}">
                                 <CheckBox x:Name="ClipboardToggle" Style="{StaticResource ToggleSwitch}" Click="ClipboardToggle_Click">
                                     <StackPanel>
                                         <TextBlock Text="Sync clipboard with phones" Style="{StaticResource SettingsTitle}" />

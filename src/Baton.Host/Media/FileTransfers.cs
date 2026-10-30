@@ -32,6 +32,9 @@ public sealed class FileTransfers
     public string ReceiveFolder { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "Baton");
 
+    /// <summary>The folders phones may browse and fetch files from.</summary>
+    public SharedFolders Shared { get; } = new();
+
     /// <summary>A phone's file was saved here: the phone, and the file's path.</summary>
     public event Action<string, string>? Received;
 
@@ -99,10 +102,30 @@ public sealed class FileTransfers
 
     private async Task OnMessageAsync(string deviceId, Envelope envelope)
     {
-        if (envelope.Type != MessageTypes.FileOffer || envelope.Read<FileOfferPayload>() is not { Token: null } offer)
+        switch (envelope.Type)
         {
-            return;
+            case MessageTypes.FileOffer when envelope.Read<FileOfferPayload>() is { Token: null } offer:
+                await AskForUploadAsync(deviceId, offer);
+                break;
+            case MessageTypes.FolderList when envelope.Read<FolderListPayload>() is { } list:
+                await _host.SendAsync(deviceId, MessageTypes.FolderListing, Shared.List(list.RequestId, list.Path));
+                break;
+            case MessageTypes.FileFetch when envelope.Read<FileFetchPayload>() is { } fetch:
+                if (Shared.ResolveFile(fetch.Path) is { } file)
+                {
+                    await SendAsync(deviceId, [file]);
+                }
+                else
+                {
+                    _host.Diagnostics.Record(DiagnosticsCategory.Handoff, "file.fetch.refused", "not in a shared folder", deviceId, DiagnosticsSeverity.Warning);
+                }
+
+                break;
         }
+    }
+
+    private async Task AskForUploadAsync(string deviceId, FileOfferPayload offer)
+    {
 
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
         _uploads[token] = new PendingUpload(deviceId, offer.TransferId, offer.Name, Math.Max(0, offer.Size), DateTimeOffset.UtcNow.Add(UploadWindow));

@@ -35,6 +35,35 @@ internal static class UserSettings
         set => Write(nameof(SyncClipboard), value);
     }
 
+    /// <summary>The folders phones may browse and fetch files from; none until the user picks some.</summary>
+    public static IReadOnlyList<string> SharedFolders
+    {
+        get
+        {
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(KeyPath);
+                return key?.GetValue(nameof(SharedFolders)) as string[] ?? [];
+            }
+            catch
+            {
+                return [];
+            }
+        }
+        set
+        {
+            try
+            {
+                using var key = Registry.CurrentUser.CreateSubKey(KeyPath, writable: true);
+                key.SetValue(nameof(SharedFolders), value.ToArray(), RegistryValueKind.MultiString);
+            }
+            catch
+            {
+                // The folders stay as they were.
+            }
+        }
+    }
+
     /// <summary>The phone the send shortcut went to last; it goes there again.</summary>
     public static string? LastTargetDeviceId
     {
