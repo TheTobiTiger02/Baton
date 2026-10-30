@@ -32,6 +32,49 @@ class ContentTest {
         assertEquals("trailer", YouTubeResolver.pick(results, "The Love Hypothesis", null, 151_000))
     }
 
+    // Same trimmed search response as the PC's ProtocolTests: a video, a Shorts shelf, a video.
+    private val searchResponse = """
+        {"contents":{"sectionListRenderer":{"contents":[{"itemSectionRenderer":{"contents":[
+          {"videoRenderer":{"videoId":"RE3_PGwDwhw","title":{"runs":[{"text":"Gemeinsam 150 Pfund abnehmen und 250.000 ${'$'} gewinnen"}]},
+            "ownerText":{"runs":[{"text":"MrBeast"}]},"lengthText":{"simpleText":"43:17"}}},
+          {"gridShelfViewModel":{"contents":[{"shortsLockupViewModel":{
+            "onTap":{"innertubeCommand":{"reelWatchEndpoint":{"videoId":"5S_6Dp5D8Vs"}}},
+            "overlayMetadata":{"primaryText":{"content":"Me at the Zoo VS"}}}}]}},
+          {"videoRenderer":{"videoId":"jNQXAC9IVRw","title":{"runs":[{"text":"Me at the zoo"}]},
+            "ownerText":{"runs":[{"text":"jawed"}]},"lengthText":{"simpleText":"0:19"}}}
+        ]}}]}}}
+    """.trimIndent()
+
+    private fun parsedSearch() = YouTubeResolver.parse(kotlinx.serialization.json.Json.parseToJsonElement(searchResponse))
+
+    @Test
+    fun resolverReadsVideosThenShorts() {
+        val results = parsedSearch()
+        assertEquals(listOf("RE3_PGwDwhw", "jNQXAC9IVRw", "5S_6Dp5D8Vs"), results.map { it.id })
+        assertEquals(listOf(false, false, true), results.map { it.isShort })
+        assertEquals("Me at the Zoo VS", results[2].title)
+    }
+
+    @Test
+    fun resolverMatchesTranslatedTitleOnlyInItsLanguage() {
+        val english = listOf(YouTubeResolver.Candidate("RE3_PGwDwhw", "Lose 150 Lbs Together, Win $250,000", "MrBeast", 2_597_000))
+        val title = "Gemeinsam 150 Pfund abnehmen und 250.000 $ gewinnen"
+        assertNull(YouTubeResolver.pick(english, title, "MrBeast", 2_597_000))
+        assertEquals("RE3_PGwDwhw", YouTubeResolver.pick(parsedSearch(), title, "MrBeast", 2_597_000))
+    }
+
+    @Test
+    fun resolverPicksShortsOnlyForShortPlayback() {
+        assertEquals("5S_6Dp5D8Vs", YouTubeResolver.pick(parsedSearch(), "Me at the Zoo VS", null, 42_000))
+        assertNull(YouTubeResolver.pick(parsedSearch(), "Me at the Zoo VS", null, 600_000))
+    }
+
+    @Test
+    fun resolverSearchesLocalLanguageThenEnglish() {
+        assertEquals(listOf("de", "en"), YouTubeResolver.searchLanguages("de"))
+        assertEquals(listOf("en"), YouTubeResolver.searchLanguages("EN"))
+    }
+
     @Test
     fun parsesLengths() {
         assertEquals(6_205_000L, YouTubeResolver.parseLength("1:43:25"))

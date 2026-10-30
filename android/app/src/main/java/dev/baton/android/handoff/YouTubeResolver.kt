@@ -1,5 +1,6 @@
 package dev.baton.android.handoff
 
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -24,37 +25,59 @@ object YouTubeResolver {
     private const val SEARCH_URL = "https://www.youtube.com/youtubei/v1/search?prettyPrint=false"
     private val http = OkHttpClient.Builder().callTimeout(10, TimeUnit.SECONDS).build()
 
-    data class Candidate(val id: String, val title: String, val channel: String, val durationMs: Long = 0)
+    /** Shorts are at most three minutes long; their search results carry no length. */
+    const val SHORTS_MAX_MS = 180_000L
+
+    data class Candidate(val id: String, val title: String, val channel: String, val durationMs: Long = 0, val isShort: Boolean = false)
+
+    /**
+     * YouTube translates titles for each viewer, so a title the PC read in German only matches a
+     * German search. This phone's language goes first; English catches titles left untranslated.
+     */
+    fun searchLanguages(preferred: String = Locale.getDefault().language): List<String> =
+        listOf(preferred.lowercase(), "en").filter { it.length == 2 }.distinct()
 
     suspend fun findVideoId(title: String, channel: String?, durationMs: Long = 0): String? = withContext(Dispatchers.IO) {
+        searchLanguages().firstNotNullOfOrNull { hl -> search(title, channel, hl)?.let { pick(it, title, channel, durationMs) } }
+    }
+
+    private fun search(title: String, channel: String?, hl: String): List<Candidate>? {
         val body = buildJsonObject {
             putJsonObject("context") {
                 putJsonObject("client") {
                     put("clientName", "WEB")
                     put("clientVersion", "2.20250901.00.00")
-                    put("hl", "en")
+                    put("hl", hl)
                 }
             }
             put("query", if (channel.isNullOrBlank()) title else "$title $channel")
         }.toString()
-        runCatching {
+        return runCatching {
             http.newCall(
                 Request.Builder().url(SEARCH_URL).post(body.toRequestBody("application/json".toMediaType())).build()
             ).execute().use { response ->
                 if (!response.isSuccessful) return@use null
-                val root = kotlinx.serialization.json.Json.parseToJsonElement(response.body?.string().orEmpty())
-                pick(videoRenderers(root).take(10).toList(), title, channel, durationMs)
+                parse(kotlinx.serialization.json.Json.parseToJsonElement(response.body?.string().orEmpty()))
             }
         }.getOrNull()
+    }
+
+    /** The first ten videos in result order, then the first ten Shorts. */
+    fun parse(root: JsonElement): List<Candidate> {
+        val all = candidates(root).toList()
+        return all.filter { !it.isShort }.take(10) + all.filter { it.isShort }.take(10)
     }
 
     /**
      * The exact title (preferring the same channel) wins; otherwise the top result if its title is
      * close. When the length of what was playing is known, a candidate of another length is never
-     * picked: a film's title also matches its trailer.
+     * picked: a film's title also matches its trailer. A Short has no length in the results, so it
+     * only qualifies when what was playing is short enough to be one.
      */
     fun pick(all: List<Candidate>, title: String, channel: String?, durationMs: Long = 0): String? {
-        val candidates = if (durationMs > 0) all.filter { sameLength(it.durationMs, durationMs) } else all
+        val candidates = if (durationMs > 0) all.filter {
+            sameLength(it.durationMs, durationMs) || (it.isShort && durationMs <= SHORTS_MAX_MS + 1_000)
+        } else all
         val wanted = normalize(title)
         val exact = candidates.filter { normalize(it.title) == wanted }
         if (exact.isNotEmpty()) {
@@ -65,20 +88,34 @@ object YouTubeResolver {
         return if (wanted.isNotEmpty() && topTitle.isNotEmpty() && (topTitle.contains(wanted) || wanted.contains(topTitle))) top.id else null
     }
 
-    private fun videoRenderers(node: JsonElement): Sequence<Candidate> = sequence {
+    private fun candidates(node: JsonElement): Sequence<Candidate> = sequence {
         when (node) {
             is JsonObject -> {
                 val video = node["videoRenderer"] as? JsonObject
-                val id = (video?.get("videoId") as? JsonPrimitive)?.content
-                if (video != null && id != null) {
-                    yield(Candidate(id, runs(video["title"]), runs(video["ownerText"]), parseLength(runs(video["lengthText"]))))
+                val lockup = node["shortsLockupViewModel"] as? JsonObject
+                val reel = node["reelItemRenderer"] as? JsonObject
+                val videoId = text(video?.get("videoId"))
+                val shortId = text(lockup?.path("onTap", "innertubeCommand", "reelWatchEndpoint", "videoId"))
+                val reelId = text(reel?.get("videoId"))
+                when {
+                    video != null && videoId != null ->
+                        yield(Candidate(videoId, runs(video["title"]), runs(video["ownerText"]), parseLength(runs(video["lengthText"]))))
+                    lockup != null && shortId != null ->
+                        yield(Candidate(shortId, text(lockup.path("overlayMetadata", "primaryText", "content")).orEmpty(), "", isShort = true))
+                    reel != null && reelId != null -> yield(Candidate(reelId, runs(reel["headline"]), "", isShort = true))
                 }
-                node.values.forEach { yieldAll(videoRenderers(it)) }
+                node.values.forEach { yieldAll(candidates(it)) }
             }
-            is JsonArray -> node.forEach { yieldAll(videoRenderers(it)) }
+            is JsonArray -> node.forEach { yieldAll(candidates(it)) }
             else -> Unit
         }
     }
+
+    private fun JsonObject.path(vararg keys: String): JsonElement? =
+        keys.fold(this as JsonElement?) { node, key -> (node as? JsonObject)?.get(key) }
+
+    private fun text(node: JsonElement?): String? =
+        (node as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotEmpty() }
 
     private fun runs(text: JsonElement?): String = runCatching {
         val obj = text as JsonObject
