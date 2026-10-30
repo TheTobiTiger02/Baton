@@ -5,15 +5,21 @@ public enum StreamQuality { Auto, High, DataSaver }
 
 /// <summary>
 /// The bitrate of one stream, stepped down the moment the link can't keep up (the phone fell
-/// behind and video was dropped) and back up slowly once it has kept up for a while, so a
-/// passing hiccup costs a few blurry seconds instead of a stutter that lasts.
+/// behind and video was dropped, or data waits in queues) and back up slowly once it has kept up
+/// for a while, so a passing hiccup costs a few blurry seconds instead of a stutter that lasts.
 /// </summary>
 public sealed class BitrateLadder
 {
-    public static readonly int[] Steps = [12_000_000, 6_000_000, 3_000_000, 1_500_000];
+    /// <summary>The last step is for a weak mobile connection away from home.</summary>
+    public static readonly int[] Steps = [12_000_000, 6_000_000, 3_000_000, 1_500_000, 750_000];
+
+    /// <summary>Waiting this much longer than the link itself takes means it is filling up.</summary>
+    public static readonly TimeSpan QueueingLimit = TimeSpan.FromMilliseconds(250);
 
     private static readonly TimeSpan DownSpacing = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan UpAfter = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan BaselineWindow = TimeSpan.FromSeconds(30);
+    private readonly Queue<(DateTimeOffset At, TimeSpan Time)> _roundTrips = new();
 
     private readonly int _best;
     private readonly int _worst;
@@ -60,6 +66,23 @@ public sealed class BitrateLadder
         _step++;
         _changedAt = now;
         return Bitrate;
+    }
+
+    /// <summary>
+    /// A probe came back after <paramref name="roundTrip"/>. True when it waited too long in
+    /// queues: longer than the fastest round trip of the last half minute, which is what the link
+    /// itself takes (a few milliseconds at home, often over a hundred on mobile data), by more than
+    /// <see cref="QueueingLimit"/>.
+    /// </summary>
+    public bool Congested(TimeSpan roundTrip, DateTimeOffset now)
+    {
+        while (_roundTrips.TryPeek(out var oldest) && now - oldest.At > BaselineWindow)
+        {
+            _roundTrips.Dequeue();
+        }
+
+        _roundTrips.Enqueue((now, roundTrip));
+        return roundTrip - _roundTrips.Min(sample => sample.Time) > QueueingLimit;
     }
 
     /// <summary>Called regularly. Returns the new bitrate when the link earned a step up.</summary>

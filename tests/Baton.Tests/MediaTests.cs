@@ -189,4 +189,26 @@ public class BitrateLadderTests
         Assert.Equal((1280, 576), Baton.Host.Streaming.BitrateLadder.Reduce((1920, 864)));
         Assert.Equal((864, 400), Baton.Host.Streaming.BitrateLadder.Reduce((864, 400)));
     }
+
+    [Fact]
+    public void CongestionIsQueueingAboveTheLinksOwnRoundTrip()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var ladder = new Baton.Host.Streaming.BitrateLadder(Baton.Host.Streaming.StreamQuality.Auto, remote: true, now);
+        static TimeSpan ms(double value) => TimeSpan.FromMilliseconds(value);
+
+        // Mobile data: 180 ms is the link itself, not congestion; 500 ms is 320 ms of queueing.
+        Assert.False(ladder.Congested(ms(180), now));
+        Assert.False(ladder.Congested(ms(400), now.AddSeconds(2)));
+        Assert.True(ladder.Congested(ms(500), now.AddSeconds(4)));
+
+        // The fast sample ages out after half a minute; a slower link becomes the new normal.
+        Assert.False(ladder.Congested(ms(400), now.AddSeconds(40)));
+        Assert.False(ladder.Congested(ms(450), now.AddSeconds(42)));
+
+        // At home the same rule still catches a filling link.
+        var home = new Baton.Host.Streaming.BitrateLadder(Baton.Host.Streaming.StreamQuality.Auto, remote: false, now);
+        Assert.False(home.Congested(ms(5), now));
+        Assert.True(home.Congested(ms(300), now.AddSeconds(2)));
+    }
 }
