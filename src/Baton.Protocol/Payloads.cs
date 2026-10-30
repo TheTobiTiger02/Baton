@@ -56,9 +56,13 @@ public sealed record HeartbeatPayload(DateTimeOffset SentAt);
 /// About a phone. <see cref="ScreenWidth"/> x <see cref="ScreenHeight"/> is the screen in pixels in
 /// its natural (portrait) orientation; window streams are encoded to fit it exactly.
 /// <see cref="AudioCodecs"/> is the compressed audio it can play (<c>opus</c>); PCM always works.
+/// <see cref="BatteryLevel"/> (percent) and <see cref="Charging"/> are resent whenever they change.
 /// </summary>
 public sealed record DeviceInfoPayload(string DisplayName, string Model, int? BatteryLevel = null, int? ScreenWidth = null, int? ScreenHeight = null,
-    IReadOnlyList<string>? AudioCodecs = null);
+    IReadOnlyList<string>? AudioCodecs = null, bool? Charging = null);
+
+/// <summary>Ring for up to <see cref="Seconds"/>, loud even on silent, until stopped on the phone.</summary>
+public sealed record RingPayload(int Seconds = 30);
 
 public sealed record DeviceForgetPayload(string? Reason = null);
 

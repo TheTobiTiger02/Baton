@@ -188,6 +188,14 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void Ring_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is DeviceViewModel phone && !await _services.Host.RingAsync(phone.DeviceId))
+        {
+            MessageBox.Show(this, $"{phone.Name} isn't connected right now.", "Couldn't ring", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+    }
+
     private void MakeDefault_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.Tag is DeviceViewModel phone)

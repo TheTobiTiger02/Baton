@@ -56,6 +56,8 @@ object MessageTypes {
     const val DEVICE_INFO = "device.info"
     const val DEVICE_FORGET = "device.forget"
     const val DEVICE_FORGOTTEN = "device.forgotten"
+    /** The PC asks this phone to ring, so it can be found. */
+    const val DEVICE_RING = "device.ring"
     const val PEERS = "peers"
     const val ERROR = "error"
     const val ACTIVITY_LIST = "activity.list"
@@ -195,8 +197,13 @@ data class DeviceInfoPayload(
     val screenWidth: Int? = null,
     val screenHeight: Int? = null,
     /** Compressed audio this phone plays (`opus`); PCM always works. */
-    val audioCodecs: List<String>? = null
+    val audioCodecs: List<String>? = null,
+    /** With [batteryLevel] (percent): resent whenever either changes. */
+    val charging: Boolean? = null
 )
+
+@Serializable
+data class RingPayload(val seconds: Int = 30)
 
 @Serializable
 data class DeviceForgetPayload(val reason: String? = null)

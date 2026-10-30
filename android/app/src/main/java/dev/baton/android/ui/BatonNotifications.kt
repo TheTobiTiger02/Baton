@@ -173,6 +173,7 @@ class HandoffActionReceiver : android.content.BroadcastReceiver() {
         when (intent.action) {
             ACTION_SEND -> HandoffEngine.sendTo(activityId = intent.getStringExtra(EXTRA_ACTIVITY))
             ACTION_PULL_PC -> HandoffEngine.pullFromPc()
+            ACTION_STOP_RING -> dev.baton.android.remote.PhoneRinger.stop(context)
             ACTION_PULL -> {
                 context.getSystemService(NotificationManager::class.java).cancel(BatonNotifications.PROMPT_ID)
                 BatonNotifications.cancelSuggestion(context)
@@ -190,6 +191,8 @@ class HandoffActionReceiver : android.content.BroadcastReceiver() {
         const val ACTION_PULL = "dev.baton.android.CONTINUE_HERE"
         /** Continues whatever the PC shows when tapped (the Edge panel's button). */
         const val ACTION_PULL_PC = "dev.baton.android.CONTINUE_FROM_PC"
+        /** Stops the ringing the PC started. */
+        const val ACTION_STOP_RING = "dev.baton.android.STOP_RING"
         private const val EXTRA_SOURCE = "source"
         private const val EXTRA_ACTIVITY = "activity"
         private const val EXTRA_TITLE = "title"
@@ -199,6 +202,8 @@ class HandoffActionReceiver : android.content.BroadcastReceiver() {
             .putExtra(EXTRA_ACTIVITY, activityId)
 
         fun pullFromPc(context: Context) = Intent(context, HandoffActionReceiver::class.java).setAction(ACTION_PULL_PC)
+
+        fun stopRinging(context: Context) = Intent(context, HandoffActionReceiver::class.java).setAction(ACTION_STOP_RING)
 
         fun pull(context: Context, peer: PeerInfo) = Intent(context, HandoffActionReceiver::class.java)
             .setAction(ACTION_PULL)

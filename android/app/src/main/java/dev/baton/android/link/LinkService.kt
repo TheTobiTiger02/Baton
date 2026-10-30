@@ -103,6 +103,24 @@ class LinkService : Service() {
         }
     }
 
+    /** Percent and whether it charges; the PC shows both next to this phone. */
+    private var battery: Pair<Int, Boolean>? = null
+
+    private val batteryWatch = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val level = intent.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1)
+            val scale = intent.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1)
+            if (level < 0 || scale <= 0) return
+            val status = intent.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1)
+            val charging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING
+            // The broadcast also comes for temperature and voltage: only a new percent or plug state is news.
+            val next = level * 100 / scale to charging
+            if (next == battery) return
+            battery = next
+            if (Link.isReady) sendDeviceInfo()
+        }
+    }
+
     private val power = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val manager = getSystemService(PowerManager::class.java)
@@ -127,6 +145,7 @@ class LinkService : Service() {
         Link.deviceId = trust.deviceId
         startInForeground()
         runCatching { getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(network) }
+        ContextCompat.registerReceiver(this, batteryWatch, IntentFilter(Intent.ACTION_BATTERY_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
         ContextCompat.registerReceiver(this, power, IntentFilter().apply {
             addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
             addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
@@ -174,6 +193,7 @@ class LinkService : Service() {
         main.removeCallbacksAndMessages(null)
         runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(network) }
         runCatching { unregisterReceiver(power) }
+        runCatching { unregisterReceiver(batteryWatch) }
         client.disconnect("Service stopped")
         HandoffEngine.stop()
         PcRemote.stop()
@@ -304,6 +324,10 @@ class LinkService : Service() {
                 BatonNotifications.updateLink(this)
             }
             MessageTypes.DEVICE_FORGOTTEN -> forgetLocally()
+            MessageTypes.DEVICE_RING -> {
+                LinkDiagnostics.record("ring")
+                dev.baton.android.remote.PhoneRinger.ring(this, envelope.read<dev.baton.android.protocol.RingPayload>().seconds)
+            }
             MessageTypes.ERROR -> onError(envelope.read())
             MessageTypes.MEDIA_CHANNEL -> openMediaChannel(envelope.read())
             else -> HandoffEngine.onMessage(envelope)
@@ -357,13 +381,7 @@ class LinkService : Service() {
             "${currentEndpoint?.let { "${it.kind} ${it.host}:${it.port}, " }.orEmpty()}${readyAt - connectStartedAt} ms after starting")
         acquireLocks()
         setStatus(LinkPhase.Ready, "Connected to ${ready.pcName}")
-        val screen = resources.displayMetrics.let { minOf(it.widthPixels, it.heightPixels) to maxOf(it.widthPixels, it.heightPixels) }
-        val real = runCatching {
-            getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
-                .let { minOf(it.width(), it.height()) to maxOf(it.width(), it.height()) }
-        }.getOrDefault(screen)
-        Link.send(MessageTypes.DEVICE_INFO, DeviceInfoPayload(trust.displayName, trust.model, screenWidth = real.first, screenHeight = real.second,
-            audioCodecs = dev.baton.android.stream.OpusAudio.decodable))
+        sendDeviceInfo()
         // One media socket for the whole session, so streams start without a handshake.
         Link.send(MessageTypes.MEDIA_CHANNEL, kotlinx.serialization.json.JsonObject(emptyMap()))
         main.removeCallbacks(heartbeat)
@@ -371,6 +389,17 @@ class LinkService : Service() {
         HandoffEngine.onReady()
         AppCatalog.publish(this)
         AppCatalog.watch(this)
+    }
+
+    /** Who this phone is, its screen, what audio it plays and its battery. Resent when the battery changes. */
+    private fun sendDeviceInfo() {
+        val screen = resources.displayMetrics.let { minOf(it.widthPixels, it.heightPixels) to maxOf(it.widthPixels, it.heightPixels) }
+        val real = runCatching {
+            getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
+                .let { minOf(it.width(), it.height()) to maxOf(it.width(), it.height()) }
+        }.getOrDefault(screen)
+        Link.send(MessageTypes.DEVICE_INFO, DeviceInfoPayload(trust.displayName, trust.model, screenWidth = real.first, screenHeight = real.second,
+            audioCodecs = dev.baton.android.stream.OpusAudio.decodable, batteryLevel = battery?.first, charging = battery?.second))
     }
 
     private fun onError(error: ErrorPayload) {

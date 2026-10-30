@@ -215,6 +215,9 @@
                                             <DockPanel>
                                                 <Button DockPanel.Dock="Right" Content="Forget" VerticalAlignment="Center" Click="Forget_Click" Tag="{Binding}" Margin="8,0,0,0" />
                                                 <Button DockPanel.Dock="Right" Content="Rename" VerticalAlignment="Center" Click="Rename_Click" Tag="{Binding}" Margin="8,0,0,0" />
+                                                <Button DockPanel.Dock="Right" Content="Ring" VerticalAlignment="Center" Click="Ring_Click" Tag="{Binding}" Margin="8,0,0,0"
+                                                        ToolTip="Rings the phone loudly, even on silent, so you can find it."
+                                                        Visibility="{Binding Online, Converter={StaticResource BoolToVisConverter}}" />
                                                 <Button DockPanel.Dock="Right" Content="Make default" VerticalAlignment="Center" Click="MakeDefault_Click" Tag="{Binding}"
                                                         ToolTip="The phone the send shortcut and the first button on each card go to."
                                                         Visibility="{Binding IsDefault, Converter={StaticResource InverseBoolToVis}}" />

@@ -69,6 +69,9 @@ public sealed class BatonHost : IAsyncDisposable
     public HostIdentity Identity { get; }
     public DeviceRegistry Devices { get; }
     public DiagnosticsLog Diagnostics { get; } = new();
+
+    /// <summary>Connected phones' batteries, as they report them.</summary>
+    public DeviceBatteries Batteries { get; } = new();
     public WebSocketSessionHub Sessions { get; } = new();
     internal EndpointEnumerator Endpoints { get; }
 
@@ -227,6 +230,9 @@ public sealed class BatonHost : IAsyncDisposable
         }
     }
 
+    /// <summary>Makes a phone ring so it can be found. False when it isn't connected.</summary>
+    public Task<bool> RingAsync(string deviceId) => SendAsync(deviceId, MessageTypes.DeviceRing, new RingPayload());
+
     /// <summary>Forgets a phone here and tells it so, if it is online, so it stops reconnecting.</summary>
     public async Task ForgetAsync(string deviceId)
     {
@@ -261,6 +267,7 @@ public sealed class BatonHost : IAsyncDisposable
 
     internal void OnDeviceDisconnected(string deviceId)
     {
+        Batteries.Clear(deviceId);
         Devices.MarkConnected(deviceId, false);
         DeviceConnectionChanged?.Invoke(deviceId, false);
     }

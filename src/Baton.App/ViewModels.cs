@@ -4,6 +4,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
+using Baton.Host;
 using Baton.Host.Handoff;
 using Baton.Protocol;
 
@@ -183,6 +184,7 @@ public sealed class DeviceViewModel : ObservableObject
     private bool _online;
     private PresenceState _presence;
     private bool _isDefault;
+    private DeviceBattery? _battery;
 
     public DeviceViewModel(string deviceId, string kind)
     {
@@ -215,15 +217,21 @@ public sealed class DeviceViewModel : ObservableObject
         }
     }
 
-    public string StatusText => !Online ? "Offline" : _presence switch
+    public string StatusText => !Online ? "Offline" : (_presence switch
     {
         PresenceState.Locked => "Connected · locked",
         PresenceState.Idle => "Connected · idle",
         _ => "Connected"
-    };
+    }) + (_battery is { } battery ? $" · {battery.Level}%{(battery.Charging ? ", charging" : "")}" : "");
 
     public void Update(DeviceView view)
     {
+        if (_battery != view.Battery)
+        {
+            _battery = view.Battery;
+            Raise(nameof(StatusText));
+        }
+
         Name = view.Name;
         _presence = view.Presence;
         Online = view.Online;

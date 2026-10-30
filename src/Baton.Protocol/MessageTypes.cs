@@ -14,6 +14,9 @@ public static class MessageTypes
     public const string DeviceInfo = "device.info";
     public const string DeviceForget = "device.forget";
     public const string DeviceForgotten = "device.forgotten";
+
+    /// <summary>The PC asks a phone to ring, so it can be found.</summary>
+    public const string DeviceRing = "device.ring";
     public const string Peers = "peers";
     public const string Error = "error";
 

@@ -41,7 +41,8 @@ public sealed record DeviceView(
     string Kind,
     bool Online,
     PresenceState Presence,
-    IReadOnlyList<Activity> Activities);
+    IReadOnlyList<Activity> Activities,
+    DeviceBattery? Battery = null);
 
 /// <summary>A handoff this PC started or received, for progress toasts.</summary>
 public sealed record HandoffEvent(

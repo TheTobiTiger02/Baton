@@ -38,3 +38,28 @@ public class SessionHubTests
             log.ReconnectReasons());
     }
 }
+
+public class DeviceBatteriesTests
+{
+    [Fact]
+    public void ReportsOnlyChangesAndForgetsDisconnectedPhones()
+    {
+        var batteries = new DeviceBatteries();
+        var changes = 0;
+        batteries.Changed += () => changes++;
+
+        batteries.Set("phone", 80, false);
+        batteries.Set("phone", 80, false);
+        batteries.Set("phone", 80, true);
+        batteries.Set("phone", null, true);
+        batteries.Set("phone", 140, true);
+
+        Assert.Equal(2, changes);
+        Assert.Equal(new DeviceBattery(80, true), batteries.Get("phone"));
+
+        batteries.Clear("phone");
+        batteries.Clear("phone");
+        Assert.Equal(3, changes);
+        Assert.Null(batteries.Get("phone"));
+    }
+}
