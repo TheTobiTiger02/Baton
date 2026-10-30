@@ -42,10 +42,14 @@ object ClipboardSync {
             if (!active) return
             val shell = ShizukuAccess.shell
             val text = shell?.let { runCatching { it.clipboardText() }.getOrNull() }
-            // The first read is what was there already: not something just copied.
+            // The first read is what was there already: not something just copied. It only counts
+            // once it succeeds: right after Baton starts the helper may not answer yet, and the
+            // clip read later would otherwise go to the PC as if it were new.
             if (baseline) {
-                if (text != null && last == null) last = text
-                baseline = false
+                if (text != null) {
+                    if (last == null) last = text
+                    baseline = false
+                }
             } else if (text != null) {
                 offer(text)
             }
