@@ -257,7 +257,8 @@ private fun openWirelessDebugging(context: Context) {
 fun ShizukuExplainer() {
     val shizuku by ShizukuAccess.state.collectAsStateWithLifecycle()
     var setupOpen by remember { mutableStateOf(false) }
-    val samsung = Build.MANUFACTURER.equals("samsung", ignoreCase = true)
+    val context = LocalContext.current
+    val edgePanel = remember { hasEdgePanel(context) }
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space3)) {
         Card(shape = RoundedCornerShape(Tokens.CardRadius),
@@ -309,8 +310,8 @@ fun ShizukuExplainer() {
         )
         Comparison(
             "Three-finger swipes",
-            without = "Not available. Use the Quick Settings tile or the buttons in Baton's notification" +
-                (if (samsung) ", or Baton's Edge panel." else "."),
+            without = "Not available. Use the Quick Settings tiles “Send to PC” and “Get from PC”, or the buttons in " +
+                "Baton's notification" + (if (edgePanel) ", or Baton's Edge panel." else "."),
             with = "Swipe up with three fingers to send to your PC, down to continue its activity here, in any app."
         )
         Comparison(

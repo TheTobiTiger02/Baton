@@ -1,5 +1,7 @@
 package dev.baton.android.mirror;
 
+import dev.baton.android.mirror.ISwipeListener;
+
 // Runs as the shell user through Shizuku (ShizukuShell). Transaction codes are fixed so the
 // two sides of an update never disagree.
 interface IShizukuShell {
@@ -20,4 +22,10 @@ interface IShizukuShell {
 
     // The clipboard's text when it changed since the last call, else null (also for sensitive clips).
     String clipboardText() = 5;
+
+    // Watches the touchscreen for three-finger swipes and reports each to the listener.
+    void watchSwipes(ISwipeListener listener) = 6;
+
+    // Stops watching for swipes.
+    void stopSwipes() = 7;
 }

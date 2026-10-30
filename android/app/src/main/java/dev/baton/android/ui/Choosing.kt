@@ -182,17 +182,17 @@ private fun describe(option: HandoffChoice, targetIsPhone: Boolean): String = wh
     else -> if (targetIsPhone) "App on this phone" else "App on the PC"
 }
 
-/** Every app on this phone, to continue on the PC (not just the one in front). */
+/** Every app on this phone, e.g. to continue on the PC (not just the one in front). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppPickerSheet(onDismiss: () -> Unit, onPick: (InstalledApp) -> Unit) {
+fun AppPickerSheet(onDismiss: () -> Unit, title: String = "Continue an app on your PC", onPick: (InstalledApp) -> Unit) {
     val context = LocalContext.current
     val apps = remember { AppCatalog.apps(context) }
     var query by remember { mutableStateOf("") }
     val shown = remember(query, apps) { apps.filter { query.isBlank() || it.name.contains(query, ignoreCase = true) } }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.padding(horizontal = Tokens.Space5)) {
-            Text("Continue an app on your PC", style = MaterialTheme.typography.titleLarge)
+            Text(title, style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(Tokens.Space3))
             OutlinedTextField(
                 value = query, onValueChange = { query = it }, singleLine = true,

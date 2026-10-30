@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Baton's Samsung Edge panel (EdgePanelProvider): RemoteViews, so only basic views. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/edge_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:id="@+id/edge_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:gravity="center"
+        android:maxLines="2"
+        android:textColor="#FFFFFFFF"
+        android:textSize="13sp" />
+
+    <Button
+        android:id="@+id/edge_send"
+        android:layout_width="match_parent"
+        android:layout_height="96dp"
+        android:layout_marginBottom="12dp"
+        android:text="@string/edge_send" />
+
+    <TextView
+        android:id="@+id/edge_send_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="20dp"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:maxLines="2"
+        android:textColor="#CCFFFFFF"
+        android:textSize="12sp" />
+
+    <Button
+        android:id="@+id/edge_pull"
+        android:layout_width="match_parent"
+        android:layout_height="96dp"
+        android:layout_marginBottom="12dp"
+        android:text="@string/edge_pull" />
+
+    <TextView
+        android:id="@+id/edge_pull_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:maxLines="2"
+        android:textColor="#CCFFFFFF"
+        android:textSize="12sp" />
+</LinearLayout>

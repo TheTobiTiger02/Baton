@@ -781,6 +781,7 @@ private fun RecentHandoffs() {
 private enum class SettingsPage(val title: String, val summary: String) {
     Handoff("Handoff", "Suggestions when you pick up this phone"),
     Sharing("Showing this phone", "How your PC shows this phone's screen"),
+    Gestures("Gestures", "Three-finger swipes and the Edge panel"),
     Shizuku("Shizuku", "Optional: what it adds, and what works without it"),
     Choices("App choices", "Which app opens what you continue"),
     Permissions("Permissions", "What Baton is allowed to do"),
@@ -829,6 +830,10 @@ fun SettingsScreen(trust: TrustStore, grants: Grants, onBack: (() -> Unit)?) {
             }
             SettingsPage.Handoff -> item { SuggestionSetting() }
             SettingsPage.Sharing -> item { ScreenSharingSetting() }
+            SettingsPage.Gestures -> {
+                item { SwipeSetting() }
+                if (hasEdgePanel(context)) item { EdgePanelHint() }
+            }
             SettingsPage.Shizuku -> item { ShizukuExplainer() }
             SettingsPage.Choices -> item { AppChoicesList() }
             SettingsPage.Permissions -> {

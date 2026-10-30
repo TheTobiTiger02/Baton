@@ -13,3 +13,5 @@ artifacts/
 
 .projectatlas/
 android/.kotlin/
+# Samsung Look SDK (license: Samsung; not redistributed)
+android/app/libs/*.jar

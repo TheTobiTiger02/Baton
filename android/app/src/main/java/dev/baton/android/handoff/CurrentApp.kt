@@ -67,5 +67,7 @@ object CurrentApp {
         Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
     }.getOrNull()
 
-    private val SYSTEM = setOf("com.android.systemui", "android", "com.google.android.permissioncontroller", "com.android.settings.intelligence")
+    private val SYSTEM = setOf("com.android.systemui", "android", "com.google.android.permissioncontroller", "com.android.settings.intelligence",
+        // Samsung's Edge screen, where Baton's panel is.
+        "com.samsung.android.app.cocktailbarservice")
 }

@@ -20,6 +20,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
@@ -37,6 +39,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
+import dev.baton.android.apps.AppCatalog
 import dev.baton.android.BatonSettings
 import dev.baton.android.BatonSettings.MirrorMode
 import dev.baton.android.handoff.BatonAccessibilityService
@@ -75,6 +80,90 @@ fun SuggestionSetting() {
                 BatonSettings.setSuggestFromPc(context, it)
             })
         }
+    }
+}
+
+/** Three-finger swipes: up sends to the PC, down continues the PC's activity here; off per app. */
+@Composable
+fun SwipeSetting() {
+    val context = LocalContext.current
+    var enabled by remember { mutableStateOf(BatonSettings.swipes(context)) }
+    var offApps by remember { mutableStateOf(BatonSettings.swipesOffApps(context)) }
+    val shizuku by ShizukuAccess.state.collectAsStateWithLifecycle()
+    var setupOpen by remember { mutableStateOf(false) }
+    var picking by remember { mutableStateOf(false) }
+    val names = remember { AppCatalog.apps(context).associate { it.id to it.name } }
+
+    fun setOffApps(next: Set<String>) {
+        offApps = next
+        BatonSettings.setSwipesOffApps(context, next)
+    }
+
+    SettingsCardColumn {
+        Row(verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().clickable {
+                enabled = !enabled
+                BatonSettings.setSwipes(context, enabled)
+                ShizukuAccess.swipesChanged()
+            }) {
+            Column(Modifier.weight(1f)) {
+                Text("Three-finger swipes", style = MaterialTheme.typography.titleMedium)
+                Text("Swipe up with three fingers to send what's on this phone to your PC; swipe down to continue your PC's " +
+                    "activity here. The app underneath also sees the swipe. Uses the free Shizuku app.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.width(Tokens.Space3))
+            Switch(checked = enabled, onCheckedChange = {
+                enabled = it
+                BatonSettings.setSwipes(context, it)
+                ShizukuAccess.swipesChanged()
+            })
+        }
+        if (enabled && shizuku != ShizukuAccess.State.Ready) {
+            HorizontalDivider(Modifier.padding(vertical = Tokens.Space2))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (shizuku == ShizukuAccess.State.NotRunning) "Shizuku isn't running, so swipes do nothing for now."
+                    else "Swipes need Shizuku.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(Tokens.Space3))
+                Button(onClick = { setupOpen = true }) { Text("Set up") }
+            }
+        }
+        if (enabled) {
+            HorizontalDivider(Modifier.padding(vertical = Tokens.Space2))
+            Text("Off in these apps", style = MaterialTheme.typography.bodyLarge)
+            offApps.sortedBy { (names[it] ?: it).lowercase() }.forEach { packageName ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(names[packageName] ?: packageName, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { setOffApps(offApps - packageName) }) {
+                        Icon(Icons.Rounded.Close, contentDescription = "Turn swipes back on in ${names[packageName] ?: packageName}")
+                    }
+                }
+            }
+            TextButton(onClick = { picking = true }, contentPadding = PaddingValues(0.dp)) { Text("Add app") }
+        }
+    }
+
+    if (setupOpen) ShizukuSetupDialog(onClose = { setupOpen = false })
+    if (picking) {
+        AppPickerSheet(onDismiss = { picking = false }, title = "Turn swipes off in") { app ->
+            picking = false
+            setOffApps(offApps + app.id)
+        }
+    }
+}
+
+/** Whether this phone has Baton's Edge panel: One UI, and a build made with Samsung's Look SDK. */
+fun hasEdgePanel(context: android.content.Context): Boolean =
+    dev.baton.android.link.BatteryOptimizationPrompt.isOneUi() && context.resources.getBoolean(dev.baton.android.R.bool.edge_panel)
+
+/** Where to find Baton's Edge panel (Samsung phones only). */
+@Composable
+fun EdgePanelHint() {
+    SettingsCardColumn {
+        Text("Edge panel", style = MaterialTheme.typography.titleMedium)
+        Text("Add Baton's panel in Settings › Display › Edge panels › Panels. It has buttons to send to your PC and to " +
+            "continue your PC's activity here.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

@@ -40,6 +40,12 @@ android {
         }
     }
 
+    // Samsung's Look SDK isn't on Maven: with its jars in libs/ (slook_v1.4.0.jar and sdk-v1.0.0.jar
+    // from developer.samsung.com), Baton gets its Edge panel (src/edge); without them it builds as before.
+    val edgePanel = fileTree("libs") { include("slook*.jar") }.files.isNotEmpty()
+    defaultConfig.resValue("bool", "edge_panel", edgePanel.toString())
+    if (edgePanel) sourceSets.getByName("main").java.srcDir("src/edge/java")
+
     buildFeatures {
         compose = true
         aidl = true
@@ -85,5 +91,6 @@ dependencies {
     implementation("androidx.media3:media3-datasource-okhttp:1.4.1")
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+    implementation(fileTree("libs") { include("*.jar") })
     testImplementation("junit:junit:4.13.2")
 }

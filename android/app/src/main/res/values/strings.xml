@@ -1,7 +1,11 @@
 <resources>
     <string name="app_name">Baton</string>
     <string name="tile_label">Send to PC</string>
+    <string name="tile_pull_label">Get from PC</string>
     <string name="share_label">Continue on PC</string>
     <string name="accessibility_description">Lets Baton open what your PC sends right away, and read the address of the page your browser shows so you can continue it on your PC. Baton reads nothing else.</string>
     <string name="listener_label">Baton media access</string>
+    <string name="edge_send">Send to PC</string>
+    <string name="edge_pull">Get from PC</string>
+    <string name="edge_description">Send what is on this phone to your PC, or continue what your PC shows here.</string>
 </resources>
