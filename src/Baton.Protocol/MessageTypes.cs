@@ -17,6 +17,11 @@ public static class MessageTypes
 
     /// <summary>The PC asks a phone to ring, so it can be found.</summary>
     public const string DeviceRing = "device.ring";
+
+    // Files sent between devices.
+    public const string FileOffer = "file.offer";
+    public const string FileUpload = "file.upload";
+    public const string FileResult = "file.result";
     public const string Peers = "peers";
     public const string Error = "error";
 

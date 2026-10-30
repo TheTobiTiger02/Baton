@@ -4,7 +4,8 @@
         xmlns:controls="clr-namespace:Baton.App.Controls"
         xmlns:app="clr-namespace:Baton.App"
         Title="Baton" Icon="Assets/Baton.ico" Width="980" Height="700" MinWidth="720" MinHeight="520"
-        WindowStartupLocation="CenterScreen" Style="{StaticResource {x:Type Window}}">
+        WindowStartupLocation="CenterScreen" Style="{StaticResource {x:Type Window}}"
+        AllowDrop="True" DragOver="Window_DragOver" Drop="Window_Drop">
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="48" ResizeBorderThickness="6" GlassFrameThickness="-1" CornerRadius="0" UseAeroCaptionButtons="False" />
     </WindowChrome.WindowChrome>
@@ -215,6 +216,9 @@
                                             <DockPanel>
                                                 <Button DockPanel.Dock="Right" Content="Forget" VerticalAlignment="Center" Click="Forget_Click" Tag="{Binding}" Margin="8,0,0,0" />
                                                 <Button DockPanel.Dock="Right" Content="Rename" VerticalAlignment="Center" Click="Rename_Click" Tag="{Binding}" Margin="8,0,0,0" />
+                                                <Button DockPanel.Dock="Right" Content="Send files…" VerticalAlignment="Center" Click="SendFiles_Click" Tag="{Binding}" Margin="8,0,0,0"
+                                                        ToolTip="Sends files to the phone. It saves them in Download/Baton and opens them. You can also drop files on this window."
+                                                        Visibility="{Binding Online, Converter={StaticResource BoolToVisConverter}}" />
                                                 <Button DockPanel.Dock="Right" Content="Ring" VerticalAlignment="Center" Click="Ring_Click" Tag="{Binding}" Margin="8,0,0,0"
                                                         ToolTip="Rings the phone loudly, even on silent, so you can find it."
                                                         Visibility="{Binding Online, Converter={StaticResource BoolToVisConverter}}" />
@@ -269,6 +273,14 @@
                                 </CheckBox>
                             </Border>
 
+                            <Border Style="{StaticResource SettingsCard}">
+                                <CheckBox x:Name="OpenFilesToggle" Style="{StaticResource ToggleSwitch}" Click="OpenFilesToggle_Click">
+                                    <StackPanel>
+                                        <TextBlock Text="Open files from phones" Style="{StaticResource SettingsTitle}" />
+                                        <TextBlock Text="Pictures, videos, music and documents a phone sends open when they arrive. Programs and scripts never do; they are saved in Downloads\Baton." Style="{StaticResource SettingsDescription}" />
+                                    </StackPanel>
+                                </CheckBox>
+                            </Border>
                             <Border Style="{StaticResource SettingsCard}">
                                 <CheckBox x:Name="ClipboardToggle" Style="{StaticResource ToggleSwitch}" Click="ClipboardToggle_Click">
                                     <StackPanel>

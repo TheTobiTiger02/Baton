@@ -324,6 +324,9 @@ class LinkService : Service() {
                 BatonNotifications.updateLink(this)
             }
             MessageTypes.DEVICE_FORGOTTEN -> forgetLocally()
+            MessageTypes.FILE_OFFER -> dev.baton.android.transfer.FileTransfers.onOffer(this, envelope.read())
+            MessageTypes.FILE_UPLOAD -> dev.baton.android.transfer.FileTransfers.onUpload(this, envelope.read())
+            MessageTypes.FILE_RESULT -> dev.baton.android.transfer.FileTransfers.onResult(this, envelope.read())
             MessageTypes.DEVICE_RING -> {
                 LinkDiagnostics.record("ring")
                 dev.baton.android.remote.PhoneRinger.ring(this, envelope.read<dev.baton.android.protocol.RingPayload>().seconds)

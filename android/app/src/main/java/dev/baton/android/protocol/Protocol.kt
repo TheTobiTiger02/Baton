@@ -58,6 +58,9 @@ object MessageTypes {
     const val DEVICE_FORGOTTEN = "device.forgotten"
     /** The PC asks this phone to ring, so it can be found. */
     const val DEVICE_RING = "device.ring"
+    const val FILE_OFFER = "file.offer"
+    const val FILE_UPLOAD = "file.upload"
+    const val FILE_RESULT = "file.result"
     const val PEERS = "peers"
     const val ERROR = "error"
     const val ACTIVITY_LIST = "activity.list"
@@ -204,6 +207,18 @@ data class DeviceInfoPayload(
 
 @Serializable
 data class RingPayload(val seconds: Int = 30)
+
+/** A file one device sends another; from the PC, [token] names it at `/files/{token}`. */
+@Serializable
+data class FileOfferPayload(val transferId: String, val name: String, val size: Long, val mime: String? = null, val token: String? = null)
+
+/** Where to upload the file this phone offered: `PUT /upload/{token}`, once. */
+@Serializable
+data class FileUploadPayload(val transferId: String, val token: String)
+
+/** How a file arrived, told by the device that received it. */
+@Serializable
+data class FileResultPayload(val transferId: String, val ok: Boolean, val detail: String? = null)
 
 @Serializable
 data class DeviceForgetPayload(val reason: String? = null)

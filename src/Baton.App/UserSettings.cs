@@ -14,6 +14,13 @@ internal static class UserSettings
         set => Write(nameof(SuggestOnReturn), value);
     }
 
+    /// <summary>A file from a phone opens as soon as it arrives (documents, pictures and media only).</summary>
+    public static bool OpenReceivedFiles
+    {
+        get => Read(nameof(OpenReceivedFiles), true);
+        set => Write(nameof(OpenReceivedFiles), value);
+    }
+
     /// <summary>Copies travel between this PC and connected phones all the time, not only while one shows the other.</summary>
     public static bool SyncClipboard
     {

@@ -63,3 +63,32 @@ public class DeviceBatteriesTests
         Assert.Null(batteries.Get("phone"));
     }
 }
+
+public class FileTransfersTests
+{
+    [Theory]
+    [InlineData("photo.jpg", "photo.jpg")]
+    [InlineData("../../Windows/evil.exe", "evil.exe")]
+    [InlineData(@"C:\Users\x\notes.txt", "notes.txt")]
+    [InlineData("a:b*c?.txt", "a_b_c_.txt")]
+    [InlineData("...", "file")]
+    public void SafeNameKeepsOnlyTheFileName(string offered, string saved) =>
+        Assert.Equal(saved, Baton.Host.Media.FileTransfers.SafeName(offered));
+
+    [Fact]
+    public void UniquePathNumbersRepeats()
+    {
+        var folder = Directory.CreateTempSubdirectory("baton-files").FullName;
+        try
+        {
+            Assert.Equal(Path.Combine(folder, "photo.jpg"), Baton.Host.Media.FileTransfers.UniquePath(folder, "photo.jpg"));
+            File.WriteAllText(Path.Combine(folder, "photo.jpg"), "");
+            File.WriteAllText(Path.Combine(folder, "photo (2).jpg"), "");
+            Assert.Equal(Path.Combine(folder, "photo (3).jpg"), Baton.Host.Media.FileTransfers.UniquePath(folder, "photo.jpg"));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+}

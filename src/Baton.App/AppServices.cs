@@ -86,6 +86,8 @@ internal sealed class AppServices : IDisposable
                 () => _ = Coordinator.PullAsync(phone.DeviceId, activity.Id));
         });
 
+        Host.Transfers.Received += (deviceId, path) => _app.Dispatcher.BeginInvoke(() => OnFileReceived(deviceId, path));
+
         // A browser extension without a token asks once; allowing it here gives it one.
         Runtime.Browser.ApprovalRequested += (connectionId, browser) => _app.Dispatcher.BeginInvoke(() =>
         {
@@ -381,6 +383,44 @@ internal sealed class AppServices : IDisposable
         Clipboard.Dispose();
         Runtime.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(3));
     }
+
+    /// <summary>
+    /// Kinds of file that open by themselves when they arrive: documents, pictures and media. Programs,
+    /// scripts and anything else only show in their folder; they carry the Mark of the Web too.
+    /// </summary>
+    private static readonly HashSet<string> OpensOnArrival = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif", ".bmp",
+        ".mp4", ".mov", ".mkv", ".webm", ".3gp", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac",
+        ".pdf", ".txt", ".csv", ".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp"
+    };
+
+    private void OnFileReceived(string deviceId, string path)
+    {
+        void ShowInFolder() => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+        if (UserSettings.OpenReceivedFiles && OpensOnArrival.Contains(System.IO.Path.GetExtension(path)))
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+            {
+                // No app for it: the toast still leads to the folder.
+            }
+        }
+
+        _toast ??= new ToastWindow();
+        _toast.ShowAction($"Received {System.IO.Path.GetFileName(path)}", $"From {NameOf(deviceId)} · saved in Downloads\\Baton", "",
+            "Show in folder", ShowInFolder);
+    }
+
+    /// <summary>Sends files to a phone; it saves and opens them. Returns how many were sent.</summary>
+    public Task<int> SendFilesAsync(string deviceId, IReadOnlyList<string> paths) => Host.Transfers.SendAsync(deviceId, paths);
+
+    /// <summary>The phone files dropped on Baton go to: the default one when it is connected, else any connected one.</summary>
+    public string? DropTarget() =>
+        Shell.Phones.Where(phone => phone.Online).OrderByDescending(phone => phone.DeviceId == Shell.DefaultPhoneId).FirstOrDefault()?.DeviceId;
 
     private void ShowToast(HandoffEvent handoff)
     {

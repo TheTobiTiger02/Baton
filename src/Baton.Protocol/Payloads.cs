@@ -64,6 +64,18 @@ public sealed record DeviceInfoPayload(string DisplayName, string Model, int? Ba
 /// <summary>Ring for up to <see cref="Seconds"/>, loud even on silent, until stopped on the phone.</summary>
 public sealed record RingPayload(int Seconds = 30);
 
+/// <summary>
+/// A file one device sends another. From the PC, <see cref="Token"/> names it at <c>/files/{token}</c>
+/// for the phone to fetch; from a phone it is null, and the PC answers with a <see cref="FileUploadPayload"/>.
+/// </summary>
+public sealed record FileOfferPayload(string TransferId, string Name, long Size, string? Mime = null, string? Token = null);
+
+/// <summary>Where the phone uploads the file it offered: <c>PUT /upload/{token}</c>, once.</summary>
+public sealed record FileUploadPayload(string TransferId, string Token);
+
+/// <summary>How a file arrived, told by the device that received it.</summary>
+public sealed record FileResultPayload(string TransferId, bool Ok, string? Detail = null);
+
 public sealed record DeviceForgetPayload(string? Reason = null);
 
 public sealed record ErrorPayload(string Code, string Message, string? CorrelationId = null);

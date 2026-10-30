@@ -35,6 +35,7 @@ public sealed class BatonHost : IAsyncDisposable
         StreamListener = new StreamListener(Identity, StreamTickets, Diagnostics,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<StreamListener>.Instance);
         Timeline = new HandoffTimeline(Diagnostics);
+        Transfers = new Media.FileTransfers(this);
         MediaChannels = new MediaChannelHub(StreamTickets, Diagnostics);
         WindowStreams = new WindowStreamService(MediaChannels, Diagnostics, Timeline);
         WindowStreams.MutedAppsPath = Path.Combine(StorageDirectory, "muted-apps.json");
@@ -69,6 +70,9 @@ public sealed class BatonHost : IAsyncDisposable
     public HostIdentity Identity { get; }
     public DeviceRegistry Devices { get; }
     public DiagnosticsLog Diagnostics { get; } = new();
+
+    /// <summary>Files sent between this PC and its phones.</summary>
+    public Media.FileTransfers Transfers { get; }
 
     /// <summary>Connected phones' batteries, as they report them.</summary>
     public DeviceBatteries Batteries { get; } = new();
@@ -139,6 +143,10 @@ public sealed class BatonHost : IAsyncDisposable
 
             return Results.File(path, Media.LocalFiles.MimeFor(path), enableRangeProcessing: true);
         });
+
+        // Files from phones: one upload per token, which only an authenticated session hands out.
+        app.MapPut("/upload/{token}", (HttpContext context, string token) =>
+            context.Connection.LocalPort == HostIdentity.WssPort ? Transfers.UploadAsync(context, token) : Task.FromResult(Results.NotFound()));
 
         app.Map("/browser", async context =>
         {

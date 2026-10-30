@@ -21,6 +21,7 @@ public partial class MainWindow : Window
         ShortcutToggle.IsChecked = WelcomeShortcut.IsChecked = DesktopShortcut.Exists;
         SuggestToggle.IsChecked = UserSettings.SuggestOnReturn;
         ClipboardToggle.IsChecked = services.SyncClipboard;
+        OpenFilesToggle.IsChecked = UserSettings.OpenReceivedFiles;
         ShowHotkeyProblems();
         Welcome.Visibility = UserSettings.Welcomed ? Visibility.Collapsed : Visibility.Visible;
         VersionText.Text = $"Baton {services.Updates.CurrentVersion}";
@@ -277,6 +278,54 @@ public partial class MainWindow : Window
 
     private void ClipboardToggle_Click(object sender, RoutedEventArgs e) =>
         _services.SyncClipboard = ClipboardToggle.IsChecked == true;
+
+    private void OpenFilesToggle_Click(object sender, RoutedEventArgs e) =>
+        UserSettings.OpenReceivedFiles = OpenFilesToggle.IsChecked == true;
+
+    private async void SendFiles_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not DeviceViewModel phone)
+        {
+            return;
+        }
+
+        var dialog = new Microsoft.Win32.OpenFileDialog { Multiselect = true, Title = $"Send to {phone.Name}" };
+        if (dialog.ShowDialog(this) == true)
+        {
+            await SendAsync(phone.DeviceId, phone.Name, dialog.FileNames);
+        }
+    }
+
+    private void Window_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) && _services.DropTarget() is not null ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    /// <summary>Files dropped anywhere on the window go to the default phone.</summary>
+    private async void Window_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] files || _services.DropTarget() is not { } deviceId)
+        {
+            return;
+        }
+
+        await SendAsync(deviceId, _services.Shell.Phones.FirstOrDefault(phone => phone.DeviceId == deviceId)?.Name ?? "your phone",
+            files.Where(System.IO.File.Exists).ToArray());
+    }
+
+    private async Task SendAsync(string deviceId, string name, IReadOnlyList<string> files)
+    {
+        if (files.Count == 0)
+        {
+            return;
+        }
+
+        if (await _services.SendFilesAsync(deviceId, files) < files.Count)
+        {
+            MessageBox.Show(this, $"Some files didn't go to {name}: it isn't connected right now.", "Couldn't send", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+    }
 
     private void StartupToggle_Click(object sender, RoutedEventArgs e)
     {
