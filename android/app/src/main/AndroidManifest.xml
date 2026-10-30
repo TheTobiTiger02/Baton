@@ -74,6 +74,12 @@
         </activity>
 
         <activity
+            android:name=".remote.RemoteActivity"
+            android:exported="false"
+            android:label="Remote"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".ui.PullFromPcActivity"
             android:exported="false"
             android:excludeFromRecents="true"

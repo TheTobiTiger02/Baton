@@ -316,6 +316,7 @@ class LinkService : Service() {
             MessageTypes.HOST_ENDPOINTS -> {
                 val payload = envelope.read<HostEndpointsPayload>()
                 endpoints.replaceAnnounced(payload.hostId, payload.endpoints)
+                payload.wake?.let { WakeOnLan.remember(this, it) }
             }
             MessageTypes.HEARTBEAT_PING -> Link.send(MessageTypes.HEARTBEAT_PONG, HeartbeatPayload())
             MessageTypes.HEARTBEAT_PONG -> Unit
@@ -324,6 +325,7 @@ class LinkService : Service() {
                 BatonNotifications.updateLink(this)
             }
             MessageTypes.DEVICE_FORGOTTEN -> forgetLocally()
+            MessageTypes.PC_STATE -> dev.baton.android.remote.PcControl.onState(envelope.read())
             MessageTypes.NOTIFICATION_DISMISS ->
                 dev.baton.android.notify.PhoneNotifications.dismiss(envelope.read<dev.baton.android.protocol.NotificationKeyPayload>().key)
             MessageTypes.NOTIFICATION_REPLY -> dev.baton.android.notify.PhoneNotifications.reply(this, envelope.read())

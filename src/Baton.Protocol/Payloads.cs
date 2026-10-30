@@ -13,7 +13,11 @@ public sealed record DiscoveryResponse(
 
 public sealed record HostEndpoint(string Host, int Port, string Kind, int Preference);
 
-public sealed record HostEndpointsPayload(string HostId, IReadOnlyList<HostEndpoint> Endpoints);
+/// <summary>Every address the PC answers on; <see cref="Wake"/> is how a phone on its network can wake it.</summary>
+public sealed record HostEndpointsPayload(string HostId, IReadOnlyList<HostEndpoint> Endpoints, IReadOnlyList<WakeTarget>? Wake = null);
+
+/// <summary>A network card's address (<c>AA:BB:CC:DD:EE:FF</c>) and its network's broadcast address, for Wake-on-LAN.</summary>
+public sealed record WakeTarget(string Mac, string Broadcast);
 
 public sealed record SessionChallengePayload(
     string ChallengeId,
@@ -86,6 +90,31 @@ public sealed record NotificationPayload(
     DateTimeOffset PostedAt,
     bool CanReply = false,
     string? Code = null);
+
+/// <summary>
+/// What a phone's remote asks of the PC; <see cref="Value"/> is a level (0-1) or on (1) / off (0),
+/// <see cref="Text"/> a key combination ("Ctrl+Shift+T") or a web address.
+/// </summary>
+public sealed record PcControlPayload(string Action, double? Value = null, string? Text = null);
+
+public static class PcControlActions
+{
+    public const string State = "state";
+    public const string Volume = "volume";
+    public const string Mute = "mute";
+    public const string MicMute = "mic-mute";
+    public const string PlayPause = "play-pause";
+    public const string Next = "next";
+    public const string Previous = "previous";
+    public const string Lock = "lock";
+    public const string Sleep = "sleep";
+    public const string Shutdown = "shutdown";
+    public const string Keys = "keys";
+    public const string Open = "open";
+}
+
+/// <summary>The PC's sound, for the remote's controls: volume (0-1) and whether speakers and microphone are muted.</summary>
+public sealed record PcStatePayload(double? Volume, bool? Muted, bool? MicMuted);
 
 /// <summary>A notification by its key: gone from the phone, or dismissed on the PC.</summary>
 public sealed record NotificationKeyPayload(string Key);

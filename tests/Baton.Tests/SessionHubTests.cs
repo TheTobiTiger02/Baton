@@ -92,3 +92,38 @@ public class FileTransfersTests
         }
     }
 }
+
+public class WakeOnLanTests
+{
+    [Theory]
+    [InlineData("192.168.178.125", "255.255.255.0", "192.168.178.255")]
+    [InlineData("10.1.2.3", "255.255.0.0", "10.1.255.255")]
+    public void BroadcastAddressCoversTheWholeNetwork(string address, string mask, string broadcast) =>
+        Assert.Equal(broadcast, Baton.Host.EndpointEnumerator.Broadcast(System.Net.IPAddress.Parse(address), System.Net.IPAddress.Parse(mask)).ToString());
+}
+
+public class KeyComboTests
+{
+    [Fact]
+    public void ReadsCombinationsAsPeopleWriteThem()
+    {
+        Assert.Equal(((ushort)0x54, new ushort[] { 0x11, 0x10 }), Normalize(Baton.Media.KeyCombo.Parse("Ctrl+Shift+T")));
+        Assert.Equal(((ushort)0x44, new ushort[] { 0x5B }), Normalize(Baton.Media.KeyCombo.Parse("win + d")));
+        Assert.Equal(((ushort)0x09, new ushort[] { 0x5B }), Normalize(Baton.Media.KeyCombo.Parse("Win+Tab")));
+        Assert.Equal(((ushort)0x73, new ushort[] { 0x12 }), Normalize(Baton.Media.KeyCombo.Parse("Alt+F4")));
+        Assert.Null(Baton.Media.KeyCombo.Parse("Ctrl+Banana"));
+        Assert.Null(Baton.Media.KeyCombo.Parse("Hyper+T"));
+    }
+
+    [Theory]
+    [InlineData("https://example.com", true)]
+    [InlineData("http://192.168.1.2:8080/x", true)]
+    [InlineData("file:///C:/Windows/notepad.exe", false)]
+    [InlineData("ms-settings:", false)]
+    [InlineData("notepad.exe", false)]
+    public void ShortcutsOpenOnlyWebPages(string address, bool opens) =>
+        Assert.Equal(opens, Baton.Host.Streaming.PcRemote.IsWebAddress(address));
+
+    private static (ushort, ushort[])? Normalize((ushort Key, IReadOnlyList<ushort> Modifiers)? combo) =>
+        combo is { } value ? (value.Key, value.Modifiers.ToArray()) : null;
+}

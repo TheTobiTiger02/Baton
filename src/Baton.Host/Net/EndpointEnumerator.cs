@@ -44,7 +44,7 @@ public sealed class EndpointEnumerator(
     public Envelope CreateEnvelope() => Envelope.Create(
         MessageTypes.HostEndpoints,
         identity.HostId,
-        new HostEndpointsPayload(identity.HostId, Current));
+        new HostEndpointsPayload(identity.HostId, Current, WakeTargets()));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -139,6 +139,41 @@ public sealed class EndpointEnumerator(
         {
             return Array.Empty<HostEndpoint>();
         }
+    }
+
+    /// <summary>
+    /// The cards a magic packet can wake: wired first (Wi-Fi rarely wakes a PC), each with its
+    /// network's broadcast address. Only cards on a real LAN, the ones a phone can reach.
+    /// </summary>
+    public static IReadOnlyList<WakeTarget> WakeTargets()
+    {
+        try
+        {
+            return NetworkInterface.GetAllNetworkInterfaces()
+                .Where(network => network.OperationalStatus == OperationalStatus.Up
+                    && network.NetworkInterfaceType is NetworkInterfaceType.Ethernet or NetworkInterfaceType.Wireless80211
+                    && network.GetPhysicalAddress().GetAddressBytes().Length == 6
+                    && network.GetIPProperties().GatewayAddresses.Any(gateway => gateway.Address.AddressFamily == AddressFamily.InterNetwork))
+                .OrderBy(network => network.NetworkInterfaceType == NetworkInterfaceType.Ethernet ? 0 : 1)
+                .SelectMany(network => network.GetIPProperties().UnicastAddresses
+                    .Where(unicast => unicast.Address.AddressFamily == AddressFamily.InterNetwork && !IsTailscale(unicast.Address))
+                    .Select(unicast => new WakeTarget(
+                        string.Join(':', network.GetPhysicalAddress().GetAddressBytes().Select(part => part.ToString("X2"))),
+                        Broadcast(unicast.Address, unicast.IPv4Mask).ToString())))
+                .Distinct()
+                .ToArray();
+        }
+        catch (NetworkInformationException)
+        {
+            return Array.Empty<WakeTarget>();
+        }
+    }
+
+    public static IPAddress Broadcast(IPAddress address, IPAddress mask)
+    {
+        var bytes = address.GetAddressBytes();
+        var maskBytes = mask.GetAddressBytes();
+        return new IPAddress(bytes.Select((part, index) => (byte)(part | ~maskBytes[index])).ToArray());
     }
 
     public static bool IsTailscale(IPAddress address) => InPrefix(address, TailscalePrefix, TailscalePrefixLength);

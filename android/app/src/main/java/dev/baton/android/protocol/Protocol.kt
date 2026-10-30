@@ -61,6 +61,8 @@ object MessageTypes {
     const val FILE_OFFER = "file.offer"
     const val FILE_UPLOAD = "file.upload"
     const val FILE_RESULT = "file.result"
+    const val PC_CONTROL = "pc.control"
+    const val PC_STATE = "pc.state"
     const val NOTIFICATION_POSTED = "notification.posted"
     const val NOTIFICATION_REMOVED = "notification.removed"
     const val NOTIFICATION_DISMISS = "notification.dismiss"
@@ -148,7 +150,11 @@ data class DiscoveryResponse(
 )
 
 @Serializable
-data class HostEndpointsPayload(val hostId: String, val endpoints: List<HostEndpoint>)
+data class HostEndpointsPayload(val hostId: String, val endpoints: List<HostEndpoint>, val wake: List<WakeTarget>? = null)
+
+/** A PC network card's address (`AA:BB:CC:DD:EE:FF`) and its network's broadcast address. */
+@Serializable
+data class WakeTarget(val mac: String, val broadcast: String)
 
 @Serializable
 data class SessionChallengePayload(
@@ -236,6 +242,31 @@ data class NotificationPayload(
     val canReply: Boolean = false,
     val code: String? = null
 )
+
+/** What the remote asks of the PC; [value] is a level (0-1) or on (1) / off (0). */
+@Serializable
+data class PcControlPayload(val action: String, val value: Double? = null, val text: String? = null)
+
+object PcControlActions {
+    const val STATE = "state"
+    const val VOLUME = "volume"
+    const val MUTE = "mute"
+    const val MIC_MUTE = "mic-mute"
+    const val PLAY_PAUSE = "play-pause"
+    const val NEXT = "next"
+    const val PREVIOUS = "previous"
+    const val LOCK = "lock"
+    const val SLEEP = "sleep"
+    const val SHUTDOWN = "shutdown"
+    /** A key combination in [PcControlPayload.text], e.g. "Win+D". */
+    const val KEYS = "keys"
+    /** A web page ([PcControlPayload.text]) to open on the PC. */
+    const val OPEN = "open"
+}
+
+/** The PC's sound: volume (0-1) and whether speakers and microphone are muted. */
+@Serializable
+data class PcStatePayload(val volume: Double? = null, val muted: Boolean? = null, val micMuted: Boolean? = null)
 
 /** A notification by its key: gone from the phone, or dismissed on the PC. */
 @Serializable
