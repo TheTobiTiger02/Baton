@@ -10,9 +10,10 @@ using Baton.Media;
 namespace Baton.App.Mirror;
 
 /// <summary>
-/// Keeps the PC's and a phone's clipboards the same while that phone mirrors to the PC or shows a
-/// PC window: text copied on either side can be pasted on the other. Only during those sessions,
-/// and never what a password manager marks as not to be shared.
+/// Keeps the PC's and the phones' clipboards the same: text copied on either side can be pasted on
+/// the other. With every connected phone while <see cref="AlwaysOn"/>, and always with a phone that
+/// mirrors to the PC or shows a PC window; never what a password manager marks as not to be shared.
+/// Only new copies travel: a phone connecting gets nothing until something is copied.
 /// </summary>
 internal sealed class ClipboardBridge : IDisposable
 {
@@ -25,6 +26,7 @@ internal sealed class ClipboardBridge : IDisposable
     private readonly Dispatcher _dispatcher;
     private readonly HwndSource _window;
     private readonly ConcurrentDictionary<string, int> _sessions = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte> _connected = new(StringComparer.Ordinal);
     private string? _last;
 
     public ClipboardBridge(BatonHost host, Dispatcher dispatcher)
@@ -35,7 +37,11 @@ internal sealed class ClipboardBridge : IDisposable
         _window.AddHook(WndProc);
         AddClipboardFormatListener(_window.Handle);
         host.MediaChannels.RecordReceived += OnRecord;
+        host.MediaChannels.ChannelChanged += OnChannelChanged;
     }
+
+    /// <summary>Sync with every connected phone, not only during a mirror or stream.</summary>
+    public bool AlwaysOn { get; set; }
 
     /// <summary>A session with a phone began: from now on copies travel, starting with what the PC holds.</summary>
     public void Start(string deviceId) => _dispatcher.BeginInvoke(() =>
@@ -65,16 +71,17 @@ internal sealed class ClipboardBridge : IDisposable
     public void Dispose()
     {
         _host.MediaChannels.RecordReceived -= OnRecord;
+        _host.MediaChannels.ChannelChanged -= OnChannelChanged;
         RemoveClipboardFormatListener(_window.Handle);
         _window.Dispose();
     }
 
     private IntPtr WndProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (message == WmClipboardUpdate && !_sessions.IsEmpty && ReadPc() is { } text && text != _last)
+        if (message == WmClipboardUpdate && Recipients().ToArray() is { Length: > 0 } recipients && ReadPc() is { } text && text != _last)
         {
             _last = text;
-            foreach (var deviceId in _sessions.Keys)
+            foreach (var deviceId in recipients)
             {
                 Push(deviceId, text);
             }
@@ -87,7 +94,7 @@ internal sealed class ClipboardBridge : IDisposable
     private void OnRecord(string deviceId, StreamRecordHeader header, byte[] payload)
     {
         if (header.Channel != StreamChannel.Control || payload.Length == 0 || payload[0] != (byte)ControlMessageType.Clipboard
-            || !_sessions.ContainsKey(deviceId))
+            || !Syncs(deviceId))
         {
             return;
         }
@@ -110,6 +117,23 @@ internal sealed class ClipboardBridge : IDisposable
             _host.Diagnostics.Record(DiagnosticsCategory.Stream, "clipboard.from-phone", $"{text.Length} characters", deviceId);
         });
     }
+
+    private void OnChannelChanged(string deviceId, bool open)
+    {
+        if (open)
+        {
+            _connected[deviceId] = 0;
+        }
+        else
+        {
+            _connected.TryRemove(deviceId, out _);
+        }
+    }
+
+    private bool Syncs(string deviceId) => _sessions.ContainsKey(deviceId) || (AlwaysOn && _connected.ContainsKey(deviceId));
+
+    private IEnumerable<string> Recipients() =>
+        (AlwaysOn ? _sessions.Keys.Union(_connected.Keys) : _sessions.Keys).Distinct(StringComparer.Ordinal);
 
     private void Push(string deviceId, string text)
     {

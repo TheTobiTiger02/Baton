@@ -269,6 +269,15 @@
                                 </CheckBox>
                             </Border>
 
+                            <Border Style="{StaticResource SettingsCard}">
+                                <CheckBox x:Name="ClipboardToggle" Style="{StaticResource ToggleSwitch}" Click="ClipboardToggle_Click">
+                                    <StackPanel>
+                                        <TextBlock Text="Sync clipboard with phones" Style="{StaticResource SettingsTitle}" />
+                                        <TextBlock Text="Text you copy on this PC can be pasted on your connected phones, and the other way round. What password managers copy is never shared." Style="{StaticResource SettingsDescription}" />
+                                    </StackPanel>
+                                </CheckBox>
+                            </Border>
+
                             <TextBlock Text="Shortcuts" Style="{StaticResource SettingsGroupHeader}" Margin="0,24,0,8" />
                             <Border Style="{StaticResource SettingsCard}">
                                 <DockPanel>

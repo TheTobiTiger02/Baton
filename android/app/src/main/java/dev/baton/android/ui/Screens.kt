@@ -779,7 +779,7 @@ private fun RecentHandoffs() {
 
 /** The settings screens, reached from one list, as Android's own settings are. */
 private enum class SettingsPage(val title: String, val summary: String) {
-    Handoff("Handoff", "Suggestions when you pick up this phone"),
+    Handoff("Handoff", "Suggestions and the shared clipboard"),
     Sharing("Showing this phone", "How your PC shows this phone's screen"),
     Gestures("Gestures", "Three-finger swipes and the Edge panel"),
     Shizuku("Shizuku", "Optional: what it adds, and what works without it"),
@@ -828,7 +828,10 @@ fun SettingsScreen(trust: TrustStore, grants: Grants, onBack: (() -> Unit)?) {
                     }
                 }
             }
-            SettingsPage.Handoff -> item { SuggestionSetting() }
+            SettingsPage.Handoff -> {
+                item { SuggestionSetting() }
+                item { ClipboardSetting() }
+            }
             SettingsPage.Sharing -> item { ScreenSharingSetting() }
             SettingsPage.Gestures -> {
                 item { SwipeSetting() }

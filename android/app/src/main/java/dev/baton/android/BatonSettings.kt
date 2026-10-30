@@ -6,6 +6,7 @@ import android.content.Context
 object BatonSettings {
     private const val FILE = "baton_settings"
     private const val SUGGEST_FROM_PC = "suggest_from_pc"
+    private const val SYNC_CLIPBOARD = "sync_clipboard"
     private const val MIRROR_MODE = "mirror_mode"
     private const val WIRELESS_DEBUGGING_OFF = "wireless_debugging_off"
     private const val REVOKE_PENDING = "revoke_pending"
@@ -27,6 +28,11 @@ object BatonSettings {
     fun suggestFromPc(context: Context): Boolean = prefs(context).getBoolean(SUGGEST_FROM_PC, true)
 
     fun setSuggestFromPc(context: Context, value: Boolean) = prefs(context).edit().putBoolean(SUGGEST_FROM_PC, value).apply()
+
+    /** Copies travel between this phone and the PC while connected, not only while one shows the other. */
+    fun syncClipboard(context: Context): Boolean = prefs(context).getBoolean(SYNC_CLIPBOARD, true)
+
+    fun setSyncClipboard(context: Context, value: Boolean) = prefs(context).edit().putBoolean(SYNC_CLIPBOARD, value).apply()
 
     fun mirrorMode(context: Context): MirrorMode =
         prefs(context).getString(MIRROR_MODE, null)?.let { name -> MirrorMode.entries.firstOrNull { it.name == name } }

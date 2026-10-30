@@ -387,6 +387,7 @@ class LinkService : Service() {
         main.removeCallbacks(heartbeat)
         main.postDelayed(heartbeat, HEARTBEAT_MS)
         HandoffEngine.onReady()
+        dev.baton.android.stream.ClipboardSync.linked(this, true)
         AppCatalog.publish(this)
         AppCatalog.watch(this)
     }
@@ -422,6 +423,7 @@ class LinkService : Service() {
     }
 
     private fun onClosed() {
+        dev.baton.android.stream.ClipboardSync.linked(this, false)
         MediaChannel.close()
         connecting = false
         readyAt = 0L

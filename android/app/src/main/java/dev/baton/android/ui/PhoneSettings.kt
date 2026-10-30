@@ -83,6 +83,36 @@ fun SuggestionSetting() {
     }
 }
 
+/** "Sync clipboard": copies travel between this phone and the PC while connected. */
+@Composable
+fun ClipboardSetting() {
+    val context = LocalContext.current
+    var enabled by remember { mutableStateOf(BatonSettings.syncClipboard(context)) }
+    val shizuku by ShizukuAccess.state.collectAsStateWithLifecycle()
+
+    fun set(value: Boolean) {
+        enabled = value
+        BatonSettings.setSyncClipboard(context, value)
+        dev.baton.android.stream.ClipboardSync.linked(context, dev.baton.android.link.Link.isReady)
+    }
+
+    SettingsCardColumn {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { set(!enabled) }) {
+            Column(Modifier.weight(1f)) {
+                Text("Sync clipboard", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Text you copy on your PC can be pasted here, and the other way round. Passwords are never shared. " +
+                        if (shizuku == ShizukuAccess.State.Ready) "Copies on this phone reach the PC right away, through Shizuku."
+                        else "Android hides the clipboard from apps in the background, so a copy on this phone reaches the PC when you next open Baton (right away with Shizuku).",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.width(Tokens.Space3))
+            Switch(checked = enabled, onCheckedChange = ::set)
+        }
+    }
+}
+
 /** Three-finger swipes: up sends to the PC, down continues the PC's activity here; off per app. */
 @Composable
 fun SwipeSetting() {

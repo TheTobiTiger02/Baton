@@ -20,6 +20,7 @@ public partial class MainWindow : Window
         AudioToggle.IsChecked = UserSettings.StreamAudio;
         ShortcutToggle.IsChecked = WelcomeShortcut.IsChecked = DesktopShortcut.Exists;
         SuggestToggle.IsChecked = UserSettings.SuggestOnReturn;
+        ClipboardToggle.IsChecked = services.SyncClipboard;
         ShowHotkeyProblems();
         Welcome.Visibility = UserSettings.Welcomed ? Visibility.Collapsed : Visibility.Visible;
         VersionText.Text = $"Baton {services.Updates.CurrentVersion}";
@@ -273,6 +274,9 @@ public partial class MainWindow : Window
 
     private void SuggestToggle_Click(object sender, RoutedEventArgs e) =>
         UserSettings.SuggestOnReturn = SuggestToggle.IsChecked == true;
+
+    private void ClipboardToggle_Click(object sender, RoutedEventArgs e) =>
+        _services.SyncClipboard = ClipboardToggle.IsChecked == true;
 
     private void StartupToggle_Click(object sender, RoutedEventArgs e)
     {

@@ -34,7 +34,7 @@ internal sealed class AppServices : IDisposable
         Shell.Continue = ContinueAsync;
         Shell.DefaultPhoneId = UserSettings.LastTargetDeviceId;
         Runtime.DefaultPhone = () => UserSettings.LastTargetDeviceId;
-        Clipboard = new Mirror.ClipboardBridge(Host, app.Dispatcher);
+        Clipboard = new Mirror.ClipboardBridge(Host, app.Dispatcher) { AlwaysOn = UserSettings.SyncClipboard };
         Host.WindowStreams.Quality = UserSettings.StreamQuality;
         Host.WindowStreams.StreamAudio = UserSettings.StreamAudio;
         Host.WindowStreams.SessionChanged += (deviceId, title, started) =>
@@ -60,6 +60,12 @@ internal sealed class AppServices : IDisposable
 
     /// <summary>Copies travel between this PC and a phone while one shows the other.</summary>
     private Mirror.ClipboardBridge Clipboard { get; }
+
+    public bool SyncClipboard
+    {
+        get => Clipboard.AlwaysOn;
+        set => Clipboard.AlwaysOn = UserSettings.SyncClipboard = value;
+    }
     public IReadOnlyList<string> HotkeyProblems { get; private set; } = [];
 
     public async Task StartAsync(bool showWindow)

@@ -14,6 +14,13 @@ internal static class UserSettings
         set => Write(nameof(SuggestOnReturn), value);
     }
 
+    /// <summary>Copies travel between this PC and connected phones all the time, not only while one shows the other.</summary>
+    public static bool SyncClipboard
+    {
+        get => Read(nameof(SyncClipboard), true);
+        set => Write(nameof(SyncClipboard), value);
+    }
+
     /// <summary>The phone the send shortcut went to last; it goes there again.</summary>
     public static string? LastTargetDeviceId
     {
