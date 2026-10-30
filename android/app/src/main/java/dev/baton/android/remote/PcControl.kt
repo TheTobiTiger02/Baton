@@ -24,8 +24,8 @@ object PcControl {
     val state: StateFlow<PcStatePayload?> = stateFlow.asStateFlow()
     private var volumeSentAt = 0L
 
-    fun send(action: String, value: Double? = null) {
-        Link.send(MessageTypes.PC_CONTROL, PcControlPayload(action, value))
+    fun send(action: String, value: Double? = null, text: String? = null) {
+        Link.send(MessageTypes.PC_CONTROL, PcControlPayload(action, value, text))
     }
 
     /** While the slider moves: often enough to follow the finger, not once per frame. */

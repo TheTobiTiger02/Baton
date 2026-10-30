@@ -104,11 +104,17 @@ private fun RemoteScreen(onBack: () -> Unit) {
         Spacer(Modifier.height(Tokens.Space3))
         if (wide) {
             Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space4)) {
-                Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) { Controls() }
+                Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                    Controls()
+                    Spacer(Modifier.height(Tokens.Space3))
+                    Shortcuts()
+                }
                 Column(Modifier.weight(1.4f)) { Touchpad(Modifier.weight(1f)); Spacer(Modifier.height(Tokens.Space3)); Keyboard() }
             }
         } else {
             Controls()
+            Spacer(Modifier.height(Tokens.Space2))
+            Shortcuts()
             Spacer(Modifier.height(Tokens.Space3))
             Touchpad(Modifier.weight(1f))
             Spacer(Modifier.height(Tokens.Space3))
@@ -158,15 +164,9 @@ private fun Controls() {
             }
             Spacer(Modifier.height(Tokens.Space2))
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space2), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = { PcControl.send(PcControlActions.LOCK) }, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Rounded.Lock, contentDescription = null); Spacer(Modifier.width(Tokens.Space1)); Text("Lock")
-                }
-                OutlinedButton(onClick = { PcControl.send(PcControlActions.SLEEP) }, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Rounded.Bedtime, contentDescription = null); Spacer(Modifier.width(Tokens.Space1)); Text("Sleep")
-                }
-                OutlinedButton(onClick = { confirmShutdown = true }, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Rounded.PowerSettingsNew, contentDescription = null); Spacer(Modifier.width(Tokens.Space1)); Text("Off")
-                }
+                PowerButton("Lock", Icons.Rounded.Lock, Modifier.weight(1f)) { PcControl.send(PcControlActions.LOCK) }
+                PowerButton("Sleep", Icons.Rounded.Bedtime, Modifier.weight(1f)) { PcControl.send(PcControlActions.SLEEP) }
+                PowerButton("Off", Icons.Rounded.PowerSettingsNew, Modifier.weight(1f)) { confirmShutdown = true }
             }
         }
     }
@@ -184,6 +184,16 @@ private fun Controls() {
             },
             dismissButton = { TextButton(onClick = { confirmShutdown = false }) { Text("Cancel") } }
         )
+    }
+}
+
+/** Icon and word side by side, the word on one line however narrow the button gets. */
+@Composable
+private fun PowerButton(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, modifier = modifier,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = Tokens.Space2, vertical = Tokens.Space2)) {
+        Icon(icon, contentDescription = null, modifier = Modifier.padding(end = Tokens.Space1))
+        Text(label, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
     }
 }
 

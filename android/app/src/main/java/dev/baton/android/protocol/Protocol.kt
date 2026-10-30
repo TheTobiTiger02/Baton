@@ -245,7 +245,7 @@ data class NotificationPayload(
 
 /** What the remote asks of the PC; [value] is a level (0-1) or on (1) / off (0). */
 @Serializable
-data class PcControlPayload(val action: String, val value: Double? = null)
+data class PcControlPayload(val action: String, val value: Double? = null, val text: String? = null)
 
 object PcControlActions {
     const val STATE = "state"
@@ -258,6 +258,10 @@ object PcControlActions {
     const val LOCK = "lock"
     const val SLEEP = "sleep"
     const val SHUTDOWN = "shutdown"
+    /** A key combination in [PcControlPayload.text], e.g. "Win+D". */
+    const val KEYS = "keys"
+    /** A web page ([PcControlPayload.text]) to open on the PC. */
+    const val OPEN = "open"
 }
 
 /** The PC's sound: volume (0-1) and whether speakers and microphone are muted. */

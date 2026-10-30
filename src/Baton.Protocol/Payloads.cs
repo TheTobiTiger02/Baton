@@ -91,8 +91,11 @@ public sealed record NotificationPayload(
     bool CanReply = false,
     string? Code = null);
 
-/// <summary>What a phone's remote asks of the PC; <see cref="Value"/> is a level (0-1) or on (1) / off (0).</summary>
-public sealed record PcControlPayload(string Action, double? Value = null);
+/// <summary>
+/// What a phone's remote asks of the PC; <see cref="Value"/> is a level (0-1) or on (1) / off (0),
+/// <see cref="Text"/> a key combination ("Ctrl+Shift+T") or a web address.
+/// </summary>
+public sealed record PcControlPayload(string Action, double? Value = null, string? Text = null);
 
 public static class PcControlActions
 {
@@ -106,6 +109,8 @@ public static class PcControlActions
     public const string Lock = "lock";
     public const string Sleep = "sleep";
     public const string Shutdown = "shutdown";
+    public const string Keys = "keys";
+    public const string Open = "open";
 }
 
 /// <summary>The PC's sound, for the remote's controls: volume (0-1) and whether speakers and microphone are muted.</summary>

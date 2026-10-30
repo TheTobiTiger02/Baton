@@ -93,6 +93,12 @@ public sealed class PcRemote
                 // After the answer: the network goes down with the PC.
                 _ = Task.Delay(500).ContinueWith(_ => SetSuspendState(false, false, false));
                 break;
+            case PcControlActions.Keys when control.Text is { } keys && KeyCombo.Parse(keys) is { } combo:
+                InputInjector.Chord(combo.Key, combo.Modifiers);
+                break;
+            case PcControlActions.Open when control.Text is { } address && IsWebAddress(address):
+                Process.Start(new ProcessStartInfo(address) { UseShellExecute = true });
+                break;
             case PcControlActions.Shutdown:
                 Process.Start(new ProcessStartInfo("shutdown.exe", "/s /t 5 /c \"Shut down from your phone with Baton.\"") { CreateNoWindow = true });
                 break;
@@ -105,6 +111,10 @@ public sealed class PcRemote
 
         await _host.SendAsync(deviceId, MessageTypes.PcState, State());
     }
+
+    /// <summary>Only web pages: a shortcut can't start programs or open files this way.</summary>
+    public static bool IsWebAddress(string address) =>
+        Uri.TryCreate(address, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
 
     public static PcStatePayload State() => new(AppVolume.MasterLevel(), AppVolume.Muted(), AppVolume.Muted(microphone: true));
 
