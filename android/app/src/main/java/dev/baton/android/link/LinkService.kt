@@ -324,6 +324,7 @@ class LinkService : Service() {
                 BatonNotifications.updateLink(this)
             }
             MessageTypes.DEVICE_FORGOTTEN -> forgetLocally()
+            MessageTypes.PC_STATE -> dev.baton.android.remote.PcControl.onState(envelope.read())
             MessageTypes.NOTIFICATION_DISMISS ->
                 dev.baton.android.notify.PhoneNotifications.dismiss(envelope.read<dev.baton.android.protocol.NotificationKeyPayload>().key)
             MessageTypes.NOTIFICATION_REPLY -> dev.baton.android.notify.PhoneNotifications.reply(this, envelope.read())

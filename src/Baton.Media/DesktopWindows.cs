@@ -455,6 +455,13 @@ public static class InputInjector
     /// <summary>Moves the cursor to a point on screen, in pixels.</summary>
     public static void MoveToScreen(int x, int y) => MoveTo(x, y);
 
+    /// <summary>Moves the cursor by screen pixels anywhere on the desktop, across all monitors.</summary>
+    public static void MoveByOnDesktop(int dx, int dy) =>
+        MoveBy(dx, dy, (GetSystemMetrics(76), GetSystemMetrics(77), Math.Max(1, GetSystemMetrics(78)), Math.Max(1, GetSystemMetrics(79))));
+
+    /// <summary>A key by its Windows virtual-key code, e.g. the media and volume keys.</summary>
+    public static void PressVirtualKey(ushort virtualKey) => Send([Key(virtualKey, 0, 0), Key(virtualKey, 0, KeyUp)]);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct CursorPoint
     {

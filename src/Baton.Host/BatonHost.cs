@@ -38,6 +38,7 @@ public sealed class BatonHost : IAsyncDisposable
         Transfers = new Media.FileTransfers(this);
         MediaChannels = new MediaChannelHub(StreamTickets, Diagnostics);
         WindowStreams = new WindowStreamService(MediaChannels, Diagnostics, Timeline);
+        Remote = new Streaming.PcRemote(this);
         WindowStreams.MutedAppsPath = Path.Combine(StorageDirectory, "muted-apps.json");
         WindowStreams.RestoreMutedApps();
         StreamListener.ConnectionAccepted += (connection, cancellation) => connection.Kind == StreamKind.Media
@@ -70,6 +71,9 @@ public sealed class BatonHost : IAsyncDisposable
     public HostIdentity Identity { get; }
     public DeviceRegistry Devices { get; }
     public DiagnosticsLog Diagnostics { get; } = new();
+
+    /// <summary>Phones as this PC's remote: touchpad, keyboard, volume, media and power.</summary>
+    public Streaming.PcRemote Remote { get; }
 
     /// <summary>Files sent between this PC and its phones.</summary>
     public Media.FileTransfers Transfers { get; }

@@ -23,6 +23,10 @@ public static class MessageTypes
     public const string FileUpload = "file.upload";
     public const string FileResult = "file.result";
 
+    // A phone as the PC's remote.
+    public const string PcControl = "pc.control";
+    public const string PcState = "pc.state";
+
     // Phones' notifications on the PC.
     public const string NotificationPosted = "notification.posted";
     public const string NotificationRemoved = "notification.removed";

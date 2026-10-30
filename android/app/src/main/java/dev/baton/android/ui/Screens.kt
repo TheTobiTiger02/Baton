@@ -48,6 +48,7 @@ import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Mouse
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.QrCodeScanner
@@ -566,6 +567,9 @@ private fun HomeScreen(grants: Grants, onSettings: (() -> Unit)?) {
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Baton", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+                        if (status.isReady) IconButton(onClick = {
+                            context.startActivity(android.content.Intent(context, dev.baton.android.remote.RemoteActivity::class.java))
+                        }) { Icon(Icons.Rounded.Mouse, contentDescription = "Remote for your PC") }
                         if (onSettings != null) IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, contentDescription = "Settings") }
                     }
                     Spacer(Modifier.height(Tokens.Space2))

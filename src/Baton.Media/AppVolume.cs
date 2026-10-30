@@ -126,6 +126,74 @@ public static class AppVolume
         }
     }
 
+    /// <summary>The default output's volume, 0 to 1; null without an output device.</summary>
+    public static double? MasterLevel() =>
+        WithEndpoint(Render, endpoint => endpoint.GetMasterVolumeLevelScalar(out var level) == 0 ? level : (double?)null);
+
+    public static bool SetMasterLevel(double level) =>
+        WithEndpoint(Render, endpoint => endpoint.SetMasterVolumeLevelScalar((float)Math.Clamp(level, 0, 1), ref EventContext) == 0) == true;
+
+    /// <summary>Whether the default output (<paramref name="microphone"/>: the default microphone) is muted.</summary>
+    public static bool? Muted(bool microphone = false) =>
+        WithEndpoint(microphone ? Capture : Render, endpoint => endpoint.GetMute(out var muted) == 0 ? muted : (bool?)null);
+
+    public static bool SetMuted(bool muted, bool microphone = false) =>
+        WithEndpoint(microphone ? Capture : Render, endpoint => endpoint.SetMute(muted, ref EventContext) == 0) == true;
+
+    private const int Render = 0, Capture = 1;
+    private static Guid EventContext = Guid.Empty;
+
+    private static T? WithEndpoint<T>(int dataFlow, Func<IAudioEndpointVolume, T?> action)
+    {
+        IMMDeviceEnumerator? enumerator = null;
+        try
+        {
+            enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
+            // Role 0 (console) is the default device the volume mixer shows.
+            if (enumerator.GetDefaultAudioEndpoint(dataFlow, 0, out var device) != 0)
+            {
+                return default;
+            }
+
+            var iid = typeof(IAudioEndpointVolume).GUID;
+            if (device.Activate(ref iid, 23, IntPtr.Zero, out var instance) != 0)
+            {
+                return default;
+            }
+
+            return action((IAudioEndpointVolume)instance);
+        }
+        catch (COMException)
+        {
+            return default;
+        }
+        finally
+        {
+            if (enumerator is not null)
+            {
+                Marshal.ReleaseComObject(enumerator);
+            }
+        }
+    }
+
+    [ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IAudioEndpointVolume
+    {
+        [PreserveSig] int RegisterControlChangeNotify(IntPtr notify);
+        [PreserveSig] int UnregisterControlChangeNotify(IntPtr notify);
+        [PreserveSig] int GetChannelCount(out uint count);
+        [PreserveSig] int SetMasterVolumeLevel(float levelDb, ref Guid context);
+        [PreserveSig] int SetMasterVolumeLevelScalar(float level, ref Guid context);
+        [PreserveSig] int GetMasterVolumeLevel(out float levelDb);
+        [PreserveSig] int GetMasterVolumeLevelScalar(out float level);
+        [PreserveSig] int SetChannelVolumeLevel(uint channel, float levelDb, ref Guid context);
+        [PreserveSig] int SetChannelVolumeLevelScalar(uint channel, float level, ref Guid context);
+        [PreserveSig] int GetChannelVolumeLevel(uint channel, out float levelDb);
+        [PreserveSig] int GetChannelVolumeLevelScalar(uint channel, out float level);
+        [PreserveSig] int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, ref Guid context);
+        [PreserveSig] int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
+    }
+
     private static string? NameOf(int processId)
     {
         try

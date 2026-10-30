@@ -142,6 +142,9 @@ public sealed class WindowStreamService : IDisposable
 
     public bool IsStreaming => !_sessions.IsEmpty;
 
+    /// <summary>Whether a window is streamed to this phone (it then takes the phone's input).</summary>
+    public bool IsStreamingTo(string deviceId) => _sessions.ContainsKey(deviceId);
+
     /// <summary>Whether the phone said it plays Opus; older phones only get PCM.</summary>
     public void SetAudioCodecs(string deviceId, IReadOnlyList<string>? codecs)
     {
