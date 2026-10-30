@@ -74,7 +74,12 @@ object BatonNotifications {
 
     fun updateLink(context: Context) {
         context.getSystemService(NotificationManager::class.java).notify(LINK_ID, link(context))
+        // The Edge panel shows the same state; the broadcast goes nowhere when it isn't built in.
+        context.sendBroadcast(Intent(ACTION_EDGE_REFRESH).setClassName(context, EDGE_PANEL))
     }
+
+    const val ACTION_EDGE_REFRESH = "dev.baton.android.EDGE_REFRESH"
+    private const val EDGE_PANEL = "dev.baton.android.ui.EdgePanelProvider"
 
     /** Android blocked a direct start: ask the user to tap once instead. */
     fun continuePrompt(context: Context, intent: Intent, title: String) {
@@ -167,6 +172,7 @@ class HandoffActionReceiver : android.content.BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             ACTION_SEND -> HandoffEngine.sendTo(activityId = intent.getStringExtra(EXTRA_ACTIVITY))
+            ACTION_PULL_PC -> HandoffEngine.pullFromPc()
             ACTION_PULL -> {
                 context.getSystemService(NotificationManager::class.java).cancel(BatonNotifications.PROMPT_ID)
                 BatonNotifications.cancelSuggestion(context)
@@ -182,6 +188,8 @@ class HandoffActionReceiver : android.content.BroadcastReceiver() {
     companion object {
         const val ACTION_SEND = "dev.baton.android.SEND_TO_PC"
         const val ACTION_PULL = "dev.baton.android.CONTINUE_HERE"
+        /** Continues whatever the PC shows when tapped (the Edge panel's button). */
+        const val ACTION_PULL_PC = "dev.baton.android.CONTINUE_FROM_PC"
         private const val EXTRA_SOURCE = "source"
         private const val EXTRA_ACTIVITY = "activity"
         private const val EXTRA_TITLE = "title"
@@ -189,6 +197,8 @@ class HandoffActionReceiver : android.content.BroadcastReceiver() {
         fun send(context: Context, activityId: String? = null) = Intent(context, HandoffActionReceiver::class.java)
             .setAction(ACTION_SEND)
             .putExtra(EXTRA_ACTIVITY, activityId)
+
+        fun pullFromPc(context: Context) = Intent(context, HandoffActionReceiver::class.java).setAction(ACTION_PULL_PC)
 
         fun pull(context: Context, peer: PeerInfo) = Intent(context, HandoffActionReceiver::class.java)
             .setAction(ACTION_PULL)

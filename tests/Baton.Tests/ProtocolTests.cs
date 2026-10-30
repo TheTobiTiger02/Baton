@@ -171,6 +171,55 @@ public class ContentTests
         Assert.Equal("trailer", YouTubeResolver.Pick(results, "The Love Hypothesis", null, durationMs: 0));
     }
 
+    // Trimmed from a real search response: a video, a Shorts shelf, then another video.
+    private const string SearchResponse = """
+        {"contents":{"sectionListRenderer":{"contents":[{"itemSectionRenderer":{"contents":[
+          {"videoRenderer":{"videoId":"RE3_PGwDwhw","title":{"runs":[{"text":"Gemeinsam 150 Pfund abnehmen und 250.000 $ gewinnen"}]},
+            "ownerText":{"runs":[{"text":"MrBeast"}]},"lengthText":{"simpleText":"43:17"}}},
+          {"gridShelfViewModel":{"contents":[{"shortsLockupViewModel":{
+            "onTap":{"innertubeCommand":{"reelWatchEndpoint":{"videoId":"5S_6Dp5D8Vs"}}},
+            "overlayMetadata":{"primaryText":{"content":"Me at the Zoo VS"}}}}]}},
+          {"videoRenderer":{"videoId":"jNQXAC9IVRw","title":{"runs":[{"text":"Me at the zoo"}]},
+            "ownerText":{"runs":[{"text":"jawed"}]},"lengthText":{"simpleText":"0:19"}}}
+        ]}}]}}}
+        """;
+
+    [Fact]
+    public void ResolverReadsVideosThenShorts()
+    {
+        var results = YouTubeResolver.Parse(System.Text.Json.Nodes.JsonNode.Parse(SearchResponse));
+        Assert.Equal(["RE3_PGwDwhw", "jNQXAC9IVRw", "5S_6Dp5D8Vs"], results.Select(result => result.Id));
+        Assert.Equal([false, false, true], results.Select(result => result.IsShort));
+        Assert.Equal("Me at the Zoo VS", results[2].Title);
+    }
+
+    [Fact]
+    public void ResolverMatchesTranslatedTitleOnlyInItsLanguage()
+    {
+        // YouTube shows a German viewer the German title; an English search lists the English one.
+        YouTubeResolver.Candidate[] english = [new("RE3_PGwDwhw", "Lose 150 Lbs Together, Win $250,000", "MrBeast", 2_597_000)];
+        var german = YouTubeResolver.Parse(System.Text.Json.Nodes.JsonNode.Parse(SearchResponse));
+        const string title = "Gemeinsam 150 Pfund abnehmen und 250.000 $ gewinnen";
+
+        Assert.Null(YouTubeResolver.Pick(english, title, "MrBeast", 2_597_000));
+        Assert.Equal("RE3_PGwDwhw", YouTubeResolver.Pick(german, title, "MrBeast", 2_597_000));
+    }
+
+    [Fact]
+    public void ResolverPicksShortsOnlyForShortPlayback()
+    {
+        var results = YouTubeResolver.Parse(System.Text.Json.Nodes.JsonNode.Parse(SearchResponse));
+        Assert.Equal("5S_6Dp5D8Vs", YouTubeResolver.Pick(results, "Me at the Zoo VS", null, 42_000));
+        Assert.Null(YouTubeResolver.Pick(results, "Me at the Zoo VS", null, 600_000));
+    }
+
+    [Theory]
+    [InlineData("de", new[] { "de", "en" })]
+    [InlineData("EN", new[] { "en" })]
+    [InlineData("iv", new[] { "en" })]
+    public void ResolverSearchesLocalLanguageThenEnglish(string preferred, string[] expected) =>
+        Assert.Equal(expected, YouTubeResolver.SearchLanguages(preferred));
+
     [Theory]
     [InlineData("1:43:25", 6_205_000)]
     [InlineData("4:05", 245_000)]

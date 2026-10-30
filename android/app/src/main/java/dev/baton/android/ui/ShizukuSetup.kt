@@ -1,5 +1,6 @@
 package dev.baton.android.ui
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -37,7 +38,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,8 +66,8 @@ import dev.baton.android.mirror.ShizukuAccess
 @Composable
 fun ShizukuSetupDialog(onClose: () -> Unit) {
     val context = LocalContext.current
-    val shizuku by ShizukuAccess.state.collectAsState()
-    val accessibilityOn by BatonAccessibilityService.connected.collectAsState()
+    val shizuku by ShizukuAccess.state.collectAsStateWithLifecycle()
+    val accessibilityOn by BatonAccessibilityService.connected.collectAsStateWithLifecycle()
     var developerOptions by remember { mutableStateOf(developerOptionsOn(context)) }
     val setUpBefore = remember { ShizukuAccess.hasRunBefore(context) }
     var showPairing by remember { mutableStateOf(false) }
@@ -247,4 +247,95 @@ private fun openStore(context: Context) {
 private fun openWirelessDebugging(context: Context) {
     open(context, Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
         .putExtra(":settings:fragment_args_key", "toggle_adb_wireless"))
+}
+
+/**
+ * What Shizuku is and, feature by feature, what works without it and what it adds: Baton works
+ * fully without Shizuku, and this page says so as plainly as it says what Shizuku improves.
+ */
+@Composable
+fun ShizukuExplainer() {
+    val shizuku by ShizukuAccess.state.collectAsStateWithLifecycle()
+    var setupOpen by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val edgePanel = remember { hasEdgePanel(context) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space3)) {
+        Card(shape = RoundedCornerShape(Tokens.CardRadius),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+            Column(Modifier.padding(Tokens.Space4)) {
+                Text("What it is", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(Tokens.Space2))
+                Text(
+                    "Shizuku is a free, open-source app. It runs a small helper with the rights a computer has when " +
+                        "it is connected to this phone for debugging. Baton asks that helper only for the things below, " +
+                        "and only after you allow it in Shizuku. You can take that back in Shizuku at any time; Baton then " +
+                        "works as it does without it.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(Tokens.Space3))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        when (shizuku) {
+                            ShizukuAccess.State.Ready -> "Shizuku is ready on this phone."
+                            ShizukuAccess.State.NotRunning -> "Shizuku is installed but not running."
+                            ShizukuAccess.State.NotAllowed -> "Shizuku runs, but Baton isn't allowed yet."
+                            else -> "Shizuku isn't set up."
+                        },
+                        style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(Tokens.Space3))
+                    FilledTonalButton(onClick = { setupOpen = true }) {
+                        Text(if (shizuku == ShizukuAccess.State.Ready) "Setup steps" else "Set up")
+                    }
+                }
+            }
+        }
+
+        Comparison(
+            "Showing this phone on your PC",
+            without = "Android asks before each time, or once with “Keep ready” (the cast icon then stays in the status bar).",
+            with = "Never asks."
+        )
+        Comparison(
+            "Your PC's mouse and keyboard on this phone",
+            without = "Taps, swipes and typing go through Baton's accessibility service. Some games ignore them.",
+            with = "Real touches, with several fingers, that games accept too."
+        )
+        Comparison(
+            "Copying between this phone and your PC",
+            without = "While your PC shows this phone, text you copy there with Ctrl+C arrives on the PC. What you copy " +
+                "on the phone itself doesn't, since Android hides the clipboard from apps in the background.",
+            with = "Whatever you copy on the phone arrives on the PC too."
+        )
+        Comparison(
+            "Three-finger swipes",
+            without = "Not available. Use the Quick Settings tiles “Send to PC” and “Get from PC”, or the buttons in " +
+                "Baton's notification" + (if (edgePanel) ", or Baton's Edge panel." else "."),
+            with = "Swipe up with three fingers to send to your PC, down to continue its activity here, in any app."
+        )
+        Comparison(
+            "After a restart",
+            without = "Nothing to do.",
+            with = "Shizuku has to start again. It does so by itself on a Wi-Fi where Wireless debugging is always allowed."
+        )
+    }
+
+    if (setupOpen) ShizukuSetupDialog(onClose = { setupOpen = false })
+}
+
+@Composable
+private fun Comparison(feature: String, without: String, with: String) {
+    Card(shape = RoundedCornerShape(Tokens.CardRadius),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+        Column(Modifier.padding(Tokens.Space4)) {
+            Text(feature, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(Tokens.Space2))
+            Text("Without Shizuku", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(without, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(Tokens.Space2))
+            Text("With Shizuku", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            Text(with, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
 }

@@ -30,7 +30,35 @@ class ShizukuShell : IShizukuShell.Stub() {
     }
 
     override fun destroy() {
+        stopSwipes()
         exitProcess(0)
+    }
+
+    @Volatile private var swipeWatch: java.io.InputStream? = null
+
+    override fun watchSwipes(listener: ISwipeListener) {
+        stopSwipes()
+        val screen = runCatching { Touchscreen.find(exec(arrayOf("getevent", "-pl"))) }.getOrNull()
+            ?: return Unit.also { Log.w(TAG, "No touchscreen found") }
+        // The device itself, not getevent's output: through a pipe, getevent's buffer holds events back.
+        val stream = runCatching { java.io.FileInputStream(screen.path) }
+            .onFailure { Log.w(TAG, "Could not read the touchscreen", it) }
+            .getOrNull() ?: return
+        swipeWatch = stream
+        Thread({
+            runCatching {
+                // A read blocked in the device may still return once after stopSwipes: that move is dropped.
+                ThreeFingerSwipe(screen).watch(stream) { move -> if (swipeWatch === stream) listener.onSwipe(move.dx, move.dy) }
+            }.onFailure { Log.i(TAG, "Stopped watching for swipes", it) }
+            // The app went away (its listener died) or the watch was stopped.
+            runCatching { stream.close() }
+        }, "BatonSwipes").apply { isDaemon = true }.start()
+    }
+
+    override fun stopSwipes() {
+        val stream = swipeWatch ?: return
+        swipeWatch = null
+        runCatching { stream.close() }
     }
 
     override fun exec(command: Array<String>): String {

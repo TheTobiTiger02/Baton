@@ -1,5 +1,7 @@
 package dev.baton.android.ui
 
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.baton.android.apps.Choices
 import dev.baton.android.apps.AppCatalog
 import dev.baton.android.apps.AppUpdates
@@ -45,6 +47,7 @@ import androidx.compose.material.icons.rounded.Accessibility
 import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.Computer
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.QrCodeScanner
@@ -69,7 +72,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -116,7 +118,10 @@ data class Grants(
     val notifications: Boolean,
     val media: Boolean,
     val accessibility: Boolean,
-    val battery: Boolean
+    val battery: Boolean,
+    val microphone: Boolean = false,
+    /** Android blocks accessibility and media access for this install until it is allowed in App info. */
+    val restricted: Boolean = false
 ) {
     val essentialsDone: Boolean get() = notifications && media
 
@@ -125,8 +130,24 @@ data class Grants(
             notifications = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED,
             media = BatonNotificationListener.isGranted(context),
             accessibility = BatonAccessibilityService.isGranted(context),
-            battery = BatteryOptimizationPrompt.isExempt(context)
+            battery = BatteryOptimizationPrompt.isExempt(context),
+            microphone = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
+            restricted = restrictedSettings(context)
         )
+
+        /**
+         * Android 13+ greys out the accessibility and notification access switches of an app
+         * installed from a downloaded file (how Baton comes from GitHub) until "Allow restricted
+         * settings" is chosen in its App info. False when it is allowed, or can't be told.
+         */
+        private fun restrictedSettings(context: Context): Boolean {
+            if (android.os.Build.VERSION.SDK_INT < 33) return false
+            return runCatching {
+                context.getSystemService(android.app.AppOpsManager::class.java).unsafeCheckOpNoThrow(
+                    "android:access_restricted_settings", android.os.Process.myUid(), context.packageName
+                ) != android.app.AppOpsManager.MODE_ALLOWED
+            }.getOrDefault(false)
+        }
     }
 }
 
@@ -134,11 +155,14 @@ data class Grants(
 private fun rememberGrants(): Grants {
     val context = LocalContext.current
     var grants by remember { mutableStateOf(Grants.read(context)) }
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { grants = Grants.read(context) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(1_500)
-            grants = Grants.read(context)
+    // Re-read while visible only: each read asks the system about every permission.
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                grants = Grants.read(context)
+                delay(1_500)
+            }
         }
     }
     return grants
@@ -146,7 +170,7 @@ private fun rememberGrants(): Grants {
 
 @Composable
 fun BatonApp(trust: TrustStore) {
-    val status by Link.status.collectAsState()
+    val status by Link.status.collectAsStateWithLifecycle()
     val paired = remember(status) { trust.isPaired }
     var showSettings by remember { mutableStateOf(false) }
     var setupDone by remember { mutableStateOf(false) }
@@ -197,7 +221,7 @@ private fun updateTexts(state: AppUpdates.State): Pair<String, String> = when (s
 private fun UpdateCard() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state by AppUpdates.state.collectAsState()
+    val state by AppUpdates.state.collectAsStateWithLifecycle()
     val (label, line) = updateTexts(state)
     Card(shape = RoundedCornerShape(Tokens.CardRadius),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
@@ -254,7 +278,9 @@ private fun SetupScreen(grants: Grants, onContinue: () -> Unit) {
 private fun PermissionSteps(grants: Grants, onlyMissing: Boolean = false) {
     val context = LocalContext.current
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space3)) {
+        if (grants.restricted && (!grants.media || !grants.accessibility)) RestrictedSettingsHint()
         if (!onlyMissing || !grants.notifications) PermissionCard(Icons.Rounded.Notifications, "Notifications",
             "Shows what you can continue, one tap away.", grants.notifications, "Allow") {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -270,6 +296,36 @@ private fun PermissionSteps(grants: Grants, onlyMissing: Boolean = false) {
         if (!onlyMissing || !grants.battery) PermissionCard(Icons.Rounded.BatteryChargingFull, "Stay connected",
             "Keeps the link to your PC alive in the background.", grants.battery, "Allow") {
             BatteryOptimizationPrompt.requestExemption(context)
+        }
+        // One UI puts unused apps to sleep on top of Android's battery rules, and says nothing.
+        if (BatteryOptimizationPrompt.isOneUi() && (!onlyMissing || !grants.battery)) {
+            TextButton(onClick = { BatteryOptimizationPrompt.openOneUiSleepingApps(context) }) {
+                Text("Samsung: add Baton to “Never sleeping apps”")
+            }
+        }
+        if (!onlyMissing || !grants.microphone) PermissionCard(Icons.Rounded.Mic, "Phone sound on your PC",
+            "When your PC shows this phone, its sound plays there too. Android calls this the microphone; " +
+                "Baton only takes what apps play, never what the microphone hears.", grants.microphone, "Allow") {
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+}
+
+/** Shown while Android greys out the switches Baton needs, with the way to lift that. */
+@Composable
+private fun RestrictedSettingsHint() {
+    val context = LocalContext.current
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+        shape = RoundedCornerShape(Tokens.CardRadius), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(Tokens.Space4)) {
+            Text("Switch greyed out?", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(Tokens.Space1))
+            Text("Android blocks media access and accessibility for apps installed from a downloaded file. " +
+                "Open App info, tap ⋮ in the corner, choose “Allow restricted settings” and confirm. Then come back here.",
+                style = MaterialTheme.typography.bodyMedium)
+            TextButton(onClick = {
+                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")))
+            }, contentPadding = PaddingValues(0.dp)) { Text("Open App info") }
         }
     }
 }
@@ -335,7 +391,7 @@ private fun TourCard(icon: androidx.compose.ui.graphics.vector.ImageVector, titl
 private fun PairScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val status by Link.status.collectAsState()
+    val status by Link.status.collectAsStateWithLifecycle()
     var pcs by remember { mutableStateOf<List<DiscoveredPc>>(emptyList()) }
     var searching by remember { mutableStateOf(true) }
     var chosen by remember { mutableStateOf<DiscoveredPc?>(null) }
@@ -467,18 +523,18 @@ private fun CodeDialog(pc: DiscoveredPc, onDismiss: () -> Unit, onPair: (String)
 
 @Composable
 private fun HomeScreen(grants: Grants, onSettings: (() -> Unit)?) {
-    val status by Link.status.collectAsState()
-    val peers by Link.peers.collectAsState()
-    val local by HandoffEngine.local.collectAsState()
+    val status by Link.status.collectAsStateWithLifecycle()
+    val peers by Link.peers.collectAsStateWithLifecycle()
+    val local by HandoffEngine.local.collectAsStateWithLifecycle()
     val pc = peers.firstOrNull { it.kind == "pc" }
     val otherPhones = peers.filter { it.kind != "pc" && it.online }
     val ready = status.phase == LinkPhase.Ready
     var notice by remember { mutableStateOf<HandoffNotice?>(null) }
     var pickApp by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
-    val updateState by AppUpdates.state.collectAsState()
+    val updateState by AppUpdates.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    val preferences by Choices.preferences.collectAsState()
+    val preferences by Choices.preferences.collectAsStateWithLifecycle()
     val context = LocalContext.current
     if (pickApp) {
         AppPickerSheet(onDismiss = { pickApp = false }, onPick = { app ->
@@ -670,10 +726,10 @@ private fun NoticeBanner(notice: HandoffNotice) {
 
 @Composable
 private fun RecentHandoffs() {
-    val records by HandoffEngine.history.recent.collectAsState()
-    val peers by Link.peers.collectAsState()
-    val local by HandoffEngine.local.collectAsState()
-    val status by Link.status.collectAsState()
+    val records by HandoffEngine.history.recent.collectAsStateWithLifecycle()
+    val peers by Link.peers.collectAsStateWithLifecycle()
+    val local by HandoffEngine.local.collectAsStateWithLifecycle()
+    val status by Link.status.collectAsStateWithLifecycle()
     var expanded by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     fun name(id: String) = if (id == Link.deviceId) "This phone" else peers.firstOrNull { it.deviceId == id }?.name ?: "Unavailable device"
@@ -725,8 +781,11 @@ private fun RecentHandoffs() {
 private enum class SettingsPage(val title: String, val summary: String) {
     Handoff("Handoff", "Suggestions when you pick up this phone"),
     Sharing("Showing this phone", "How your PC shows this phone's screen"),
+    Gestures("Gestures", "Three-finger swipes and the Edge panel"),
+    Shizuku("Shizuku", "Optional: what it adds, and what works without it"),
     Choices("App choices", "Which app opens what you continue"),
     Permissions("Permissions", "What Baton is allowed to do"),
+    Diagnostics("Diagnostics", "Connection log, to find out why the link drops"),
     About("About", "Your PC, version and updates")
 }
 
@@ -771,20 +830,21 @@ fun SettingsScreen(trust: TrustStore, grants: Grants, onBack: (() -> Unit)?) {
             }
             SettingsPage.Handoff -> item { SuggestionSetting() }
             SettingsPage.Sharing -> item { ScreenSharingSetting() }
+            SettingsPage.Gestures -> {
+                item { SwipeSetting() }
+                if (hasEdgePanel(context)) item { EdgePanelHint() }
+            }
+            SettingsPage.Shizuku -> item { ShizukuExplainer() }
             SettingsPage.Choices -> item { AppChoicesList() }
             SettingsPage.Permissions -> {
                 item { PermissionSteps(grants) }
                 item {
-                    if (BatteryOptimizationPrompt.isOneUi()) {
-                        TextButton(onClick = { BatteryOptimizationPrompt.openOneUiSleepingApps(context) }) {
-                            Text("Samsung: keep Baton out of sleeping apps")
-                        }
-                    }
                     TextButton(onClick = {
                         context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
                     }) { Text("Allow display over other apps (instant open without accessibility)") }
                 }
             }
+            SettingsPage.Diagnostics -> item { LinkDiagnosticsSetting() }
             SettingsPage.About -> {
               item {
                 Card(shape = RoundedCornerShape(Tokens.CardRadius),

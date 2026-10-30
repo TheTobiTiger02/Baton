@@ -1,11 +1,15 @@
 package dev.baton.android.link
 
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
+import androidx.core.content.ContextCompat
 import android.net.wifi.WifiManager
 import android.os.Handler
 import android.os.IBinder
@@ -59,6 +63,8 @@ class LinkService : Service() {
     private var stopped = false
     private var lastInboundAt = 0L
     private var currentEndpoint: EndpointCandidate? = null
+    private var connectStartedAt = 0L
+    private var readyAt = 0L
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
 
@@ -68,7 +74,7 @@ class LinkService : Service() {
             if (!Link.isReady) return
             if (System.currentTimeMillis() - lastInboundAt > STALE_AFTER_MS) {
                 Log.i(TAG, "No traffic from the PC for a minute; reconnecting.")
-                dropAndReconnect("The PC stopped answering. Reconnecting…")
+                dropAndReconnect("drop.stale", "The PC stopped answering. Reconnecting…")
                 return
             }
             Link.send(MessageTypes.HEARTBEAT_PING, HeartbeatPayload())
@@ -79,6 +85,9 @@ class LinkService : Service() {
     private val network = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             main.post {
+                // "while connected" marks a switch under a live socket, which may not survive it.
+                LinkDiagnostics.record("network.available",
+                    "${transport(network)} (net $network)${if (Link.isReady) " while connected" else ""}")
                 if (!Link.isReady && trust.isPaired) {
                     retryIndex = 0
                     scheduleConnect(immediate = true)
@@ -87,7 +96,22 @@ class LinkService : Service() {
         }
 
         override fun onLost(network: Network) {
-            main.post { if (Link.isReady) dropAndReconnect("Wi-Fi lost. Reconnecting when it's back…") }
+            main.post {
+                LinkDiagnostics.record("network.lost", "net $network")
+                if (Link.isReady) dropAndReconnect("drop.network-lost", "Wi-Fi lost. Reconnecting when it's back…")
+            }
+        }
+    }
+
+    private val power = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val manager = getSystemService(PowerManager::class.java)
+            when (intent.action) {
+                PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED ->
+                    LinkDiagnostics.record(if (manager.isDeviceIdleMode) "doze.on" else "doze.off")
+                PowerManager.ACTION_POWER_SAVE_MODE_CHANGED ->
+                    LinkDiagnostics.record(if (manager.isPowerSaveMode) "battery-saver.on" else "battery-saver.off")
+            }
         }
     }
 
@@ -95,12 +119,18 @@ class LinkService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        LinkDiagnostics.init(this)
+        LinkDiagnostics.record("service.created", LinkDiagnostics.powerSummary(this))
         trust = TrustStore(this)
         endpoints = EndpointStore(this)
         Link.client = client
         Link.deviceId = trust.deviceId
         startInForeground()
         runCatching { getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(network) }
+        ContextCompat.registerReceiver(this, power, IntentFilter().apply {
+            addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
+            addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
+        }, ContextCompat.RECEIVER_NOT_EXPORTED)
         HandoffEngine.start(this)
         PcRemote.start(this)
         dev.baton.android.mirror.ShizukuAccess.init(this)
@@ -132,13 +162,18 @@ class LinkService : Service() {
         }
 
         stopped = false
-        if (!Link.isReady && !connecting) scheduleConnect(immediate = true)
+        if (!Link.isReady && !connecting) {
+            LinkDiagnostics.record("connect.requested", intent?.action?.substringAfterLast('.')?.lowercase() ?: "restarted by Android")
+            scheduleConnect(immediate = true)
+        }
         return START_STICKY
     }
 
     override fun onDestroy() {
+        LinkDiagnostics.record("service.destroyed")
         main.removeCallbacksAndMessages(null)
         runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(network) }
+        runCatching { unregisterReceiver(power) }
         client.disconnect("Service stopped")
         HandoffEngine.stop()
         PcRemote.stop()
@@ -161,6 +196,7 @@ class LinkService : Service() {
 
         Link.hostId = hostId
         connecting = true
+        connectStartedAt = System.currentTimeMillis()
         setStatus(if (link != null) LinkPhase.Pairing else LinkPhase.Searching,
             if (link != null) "Pairing with ${link.pcName}…" else "Looking for ${host?.pcName ?: "your PC"}…")
         scope.launch {
@@ -170,7 +206,8 @@ class LinkService : Service() {
             if (endpoint == null && link != null) {
                 pairing = null
                 Link.setStatus(LinkStatus(if (trust.isPaired) LinkPhase.Offline else LinkPhase.Unpaired,
-                    "Couldn't reach ${link.pcName}. Make sure both devices are on the same Wi-Fi and Baton is open on the PC."))
+                    "Couldn't reach ${link.pcName}. Make sure Baton is open on the PC, and that both devices are on " +
+                        "the same Wi-Fi or both signed in to Tailscale."))
                 return@launch
             }
             if (endpoint == null) {
@@ -184,13 +221,24 @@ class LinkService : Service() {
             if (link == null) setStatus(LinkPhase.Connecting, "Connecting to ${host?.pcName}…")
             connecting = true
             client.connect("wss://${endpoint.host}:${endpoint.port}/ws/v1/session", fingerprint, object : LanClient.Listener {
-                override fun onStatus(status: String) = Unit
                 override fun onMessage(message: String) {
                     main.post { this@LinkService.onMessage(message) }
                 }
 
-                override fun onClosed() {
-                    main.post { this@LinkService.onClosed() }
+                override fun onFailed(error: Throwable) {
+                    main.post {
+                        val cause = "${error.javaClass.simpleName}: ${error.message.orEmpty()}"
+                        if (readyAt > 0) LinkDiagnostics.record("drop.socket", "$cause${sessionLength()}")
+                        else LinkDiagnostics.record("connect.failed", "${endpoint.kind} ${endpoint.host}:${endpoint.port}, $cause")
+                        this@LinkService.onClosed()
+                    }
+                }
+
+                override fun onClosed(code: Int, reason: String) {
+                    main.post {
+                        LinkDiagnostics.record("drop.pc-closed", "$code $reason${sessionLength()}".trim())
+                        this@LinkService.onClosed()
+                    }
                 }
             })
         }
@@ -219,7 +267,14 @@ class LinkService : Service() {
         val found = first ?: if (race.isCompleted) discovery.await() else race.await()
         race.cancel()
         discovery.cancel()
-        if (found != null) endpoints.remember(hostId, found.host, found.port)
+        if (found != null) {
+            endpoints.remember(hostId, found.host, found.port)
+            LinkDiagnostics.record("find.ok", "${found.kind} ${found.host}:${found.port} after ${System.currentTimeMillis() - connectStartedAt} ms")
+        } else {
+            // No timing here, so a PC that stays off folds into one repeated line.
+            LinkDiagnostics.record("find.none", if (remembered.isEmpty()) "no remembered address, discovery found nothing"
+                else "${remembered.joinToString { it.kind }} and discovery: no answer")
+        }
         return found
     }
 
@@ -266,7 +321,7 @@ class LinkService : Service() {
 
         val host = trust.host ?: return
         if (challenge.hostId != host.hostId) {
-            dropAndReconnect("Reached a different PC. Retrying…")
+            dropAndReconnect("drop.wrong-pc", "Reached a different PC. Retrying…")
             return
         }
         val proof = SessionAuthentication.challengeProof(host.trustKey, challenge.challengeId, challenge.nonce, trust.deviceId, host.hostId)
@@ -277,6 +332,7 @@ class LinkService : Service() {
     private fun onPairConfirm(confirm: PairConfirmPayload) {
         val link = pairing ?: return
         pairing = null
+        LinkDiagnostics.record(if (confirm.accepted) "pair.accepted" else "pair.rejected", confirm.reason.orEmpty())
         if (!confirm.accepted || confirm.trustKey.isNullOrBlank()) {
             client.disconnect("Pairing rejected")
             Link.setStatus(LinkStatus(if (trust.isPaired) LinkPhase.Offline else LinkPhase.Unpaired,
@@ -296,6 +352,9 @@ class LinkService : Service() {
         connecting = false
         trust.updatePcName(ready.pcName)
         currentEndpoint?.let { endpoints.recordSuccess(it.host, it.port) }
+        readyAt = System.currentTimeMillis()
+        LinkDiagnostics.record("session.ready",
+            "${currentEndpoint?.let { "${it.kind} ${it.host}:${it.port}, " }.orEmpty()}${readyAt - connectStartedAt} ms after starting")
         acquireLocks()
         setStatus(LinkPhase.Ready, "Connected to ${ready.pcName}")
         val screen = resources.displayMetrics.let { minOf(it.widthPixels, it.heightPixels) to maxOf(it.widthPixels, it.heightPixels) }
@@ -303,7 +362,8 @@ class LinkService : Service() {
             getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
                 .let { minOf(it.width(), it.height()) to maxOf(it.width(), it.height()) }
         }.getOrDefault(screen)
-        Link.send(MessageTypes.DEVICE_INFO, DeviceInfoPayload(trust.displayName, trust.model, screenWidth = real.first, screenHeight = real.second))
+        Link.send(MessageTypes.DEVICE_INFO, DeviceInfoPayload(trust.displayName, trust.model, screenWidth = real.first, screenHeight = real.second,
+            audioCodecs = dev.baton.android.stream.OpusAudio.decodable))
         // One media socket for the whole session, so streams start without a handshake.
         Link.send(MessageTypes.MEDIA_CHANNEL, kotlinx.serialization.json.JsonObject(emptyMap()))
         main.removeCallbacks(heartbeat)
@@ -315,7 +375,9 @@ class LinkService : Service() {
 
     private fun onError(error: ErrorPayload) {
         Log.w(TAG, "PC reported ${error.code}: ${error.message}")
+        LinkDiagnostics.record("pc.error", "${error.code}: ${error.message}")
         if (error.code == "authentication_rejected") {
+            LinkDiagnostics.record("drop.rejected", sessionLength().removePrefix(", "))
             client.disconnect("Rejected")
             setStatus(LinkPhase.Offline, "The PC didn't accept this phone. Pair again if it keeps happening.")
         }
@@ -333,6 +395,7 @@ class LinkService : Service() {
     private fun onClosed() {
         MediaChannel.close()
         connecting = false
+        readyAt = 0L
         main.removeCallbacks(heartbeat)
         releaseLocks()
         Link.setPeers(emptyList())
@@ -341,13 +404,38 @@ class LinkService : Service() {
         }
     }
 
-    private fun dropAndReconnect(detail: String) {
+    private fun dropAndReconnect(cause: String, detail: String) {
+        LinkDiagnostics.record(cause, sessionLength().removePrefix(", "))
         client.cancel()
         onClosed()
         setStatus(LinkPhase.Offline, detail)
     }
 
+    /** ", after 12 min" while a session is up, so a drop says how long the link had lasted. */
+    private fun sessionLength(): String {
+        if (readyAt <= 0) return ""
+        val seconds = (System.currentTimeMillis() - readyAt) / 1000
+        return ", after " + when {
+            seconds < 120 -> "$seconds s"
+            seconds < 7_200 -> "${seconds / 60} min"
+            else -> "${seconds / 3_600} h"
+        }
+    }
+
+    private fun transport(network: Network): String {
+        val capabilities = runCatching {
+            getSystemService(ConnectivityManager::class.java).getNetworkCapabilities(network)
+        }.getOrNull() ?: return "unknown"
+        return listOf(
+            NetworkCapabilities.TRANSPORT_VPN to "vpn",
+            NetworkCapabilities.TRANSPORT_WIFI to "wifi",
+            NetworkCapabilities.TRANSPORT_CELLULAR to "cellular",
+            NetworkCapabilities.TRANSPORT_ETHERNET to "ethernet"
+        ).filter { capabilities.hasTransport(it.first) }.joinToString("+") { it.second }.ifEmpty { "other" }
+    }
+
     private fun forgetLocally() {
+        LinkDiagnostics.record("unpaired")
         pairing = null
         trust.forget()
         client.disconnect("Forgotten")

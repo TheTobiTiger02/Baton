@@ -16,6 +16,7 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- The apps Baton opens and checks for (package visibility, API 30+). -->
@@ -71,6 +72,13 @@
                 <data android:scheme="baton" android:host="pair" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".ui.PullFromPcActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@style/Theme.Baton.Translucent" />
 
         <activity
             android:name=".ui.ShareToPcActivity"
@@ -144,9 +152,39 @@
                 android:value="false" />
         </service>
 
+        <service
+            android:name=".ui.GetFromPcTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_baton"
+            android:label="@string/tile_pull_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="false" />
+        </service>
+
         <receiver
             android:name=".ui.HandoffActionReceiver"
             android:exported="false" />
+
+        <!-- Samsung Edge panel: built and enabled only with Samsung's Look SDK in libs/ (see build.gradle.kts). -->
+        <receiver
+            android:name=".ui.EdgePanelProvider"
+            android:enabled="@bool/edge_panel"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.samsung.android.cocktail.v2.action.COCKTAIL_UPDATE" />
+                <action android:name="com.samsung.android.cocktail.action.COCKTAIL_ENABLED" />
+                <action android:name="com.samsung.android.cocktail.action.COCKTAIL_DISABLED" />
+                <action android:name="com.samsung.android.cocktail.action.COCKTAIL_VISIBILITY_CHANGED" />
+            </intent-filter>
+            <meta-data
+                android:name="com.samsung.android.cocktail.provider"
+                android:resource="@xml/edge_panel" />
+        </receiver>
 
         <activity
             android:name=".mirror.MirrorConsentActivity"

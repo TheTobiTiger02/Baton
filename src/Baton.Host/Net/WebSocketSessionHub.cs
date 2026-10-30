@@ -133,7 +133,8 @@ public sealed class WebSocketSessionHub : IDisposable
         }
     }
 
-    public async Task<int> CloseStaleAsync(
+    /// <summary>Closes every session quiet since <paramref name="staleBefore"/>; returns their device ids.</summary>
+    public async Task<IReadOnlyList<string>> CloseStaleAsync(
         DateTimeOffset staleBefore,
         CancellationToken cancellationToken)
     {
@@ -160,7 +161,7 @@ public sealed class WebSocketSessionHub : IDisposable
             await entry.CloseStaleAsync(cancellationToken);
         }
 
-        return stale.Length;
+        return stale.Select(entry => entry.SessionId).ToArray();
     }
 
     public bool HasSession(string deviceId)

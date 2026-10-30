@@ -9,6 +9,8 @@ object BatonSettings {
     private const val MIRROR_MODE = "mirror_mode"
     private const val WIRELESS_DEBUGGING_OFF = "wireless_debugging_off"
     private const val REVOKE_PENDING = "revoke_pending"
+    private const val SWIPES = "swipes"
+    private const val SWIPES_OFF_APPS = "swipes_off_apps"
     /** How showing this phone on the PC gets Android's screen-sharing consent. */
     enum class MirrorMode {
         /** Android asks on every handoff. */
@@ -36,6 +38,16 @@ object BatonSettings {
     fun wirelessDebuggingOff(context: Context): Boolean = prefs(context).getBoolean(WIRELESS_DEBUGGING_OFF, true)
 
     fun setWirelessDebuggingOff(context: Context, value: Boolean) = prefs(context).edit().putBoolean(WIRELESS_DEBUGGING_OFF, value).apply()
+
+    /** Three-finger swipe up sends to the PC, down continues the PC's activity here (needs Shizuku). */
+    fun swipes(context: Context): Boolean = prefs(context).getBoolean(SWIPES, false)
+
+    fun setSwipes(context: Context, value: Boolean) = prefs(context).edit().putBoolean(SWIPES, value).apply()
+
+    /** Apps (packages) in which three-finger swipes do nothing, e.g. games that use them. */
+    fun swipesOffApps(context: Context): Set<String> = prefs(context).getStringSet(SWIPES_OFF_APPS, null).orEmpty().toSet()
+
+    fun setSwipesOffApps(context: Context, value: Set<String>) = prefs(context).edit().putStringSet(SWIPES_OFF_APPS, value).apply()
 
     /** The Shizuku mode was left while Shizuku was stopped: its screen-sharing grant is still to be taken back. */
     internal fun revokePending(context: Context): Boolean = prefs(context).getBoolean(REVOKE_PENDING, false)

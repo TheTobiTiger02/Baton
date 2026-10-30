@@ -26,7 +26,6 @@ class LanClient {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (!isCurrent(connectionGeneration, webSocket)) return
                 listener.onOpen()
-                listener.onStatus("Connected to $url")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -36,14 +35,12 @@ class LanClient {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (!clearIfCurrent(connectionGeneration, webSocket)) return
-                listener.onStatus("Connection failed: ${t.message}")
-                listener.onClosed()
+                listener.onFailed(t)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (!clearIfCurrent(connectionGeneration, webSocket)) return
-                listener.onStatus("Disconnected: $reason")
-                listener.onClosed()
+                listener.onClosed(code, reason)
             }
         })
         synchronized(socketLock) {
@@ -86,10 +83,11 @@ class LanClient {
         }
     }
 
+    /** [onFailed] and [onClosed] are the two ways a socket ends; exactly one of them fires. */
     interface Listener {
         fun onOpen() = Unit
-        fun onStatus(status: String)
         fun onMessage(message: String)
-        fun onClosed() = Unit
+        fun onFailed(error: Throwable)
+        fun onClosed(code: Int, reason: String)
     }
 }

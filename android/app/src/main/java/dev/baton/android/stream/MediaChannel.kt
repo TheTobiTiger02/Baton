@@ -32,6 +32,10 @@ object MediaChannel {
     @Volatile private var socket: StreamSocketClient? = null
     @Volatile private var records: StreamRecordWriter? = null
     @Volatile private var videoSink: MediaSink? = null
+
+    /** Compressed audio the PC said it plays, from the channel's offer. */
+    @Volatile var pcAudioCodecs: List<String> = emptyList()
+        private set
     @Volatile var audioSink: MediaSink? = null
     @Volatile var controlSink: MediaSink? = null
 
@@ -44,6 +48,7 @@ object MediaChannel {
     fun open(address: String, fingerprint: String, payload: MediaChannelPayload, onClosed: () -> Unit) {
         val current = generation.incrementAndGet()
         close(current)
+        pcAudioCodecs = payload.audioCodecs.orEmpty()
         thread(name = "Baton media reader") {
             try {
                 val client = StreamSocketClient.connect(

@@ -35,7 +35,10 @@ public enum StreamRecordFlags
     None = 0,
     CodecConfig = 1 << 0,
     Keyframe = 1 << 1,
-    FormatChange = 1 << 2
+    FormatChange = 1 << 2,
+
+    /// <summary>An audio record holding one Opus packet instead of PCM.</summary>
+    Opus = 1 << 3
 }
 
 public readonly record struct StreamHandshake(StreamKind Kind, int Version, byte[] Ticket, ulong StreamId);

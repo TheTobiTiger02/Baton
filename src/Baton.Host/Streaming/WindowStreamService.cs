@@ -28,6 +28,7 @@ public sealed class WindowStreamService : IDisposable
     private readonly ConcurrentDictionary<string, Session> _sessions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<(string Device, int Width, int Height), Pipeline> _pipelines = new();
     private readonly ConcurrentDictionary<string, (int Width, int Height)> _screens = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte> _opusDevices = new(StringComparer.Ordinal);
     private readonly object _gpuGate = new();
     private Gpu? _gpu;
 
@@ -140,6 +141,19 @@ public sealed class WindowStreamService : IDisposable
     public bool KeepAwakeWhileStreaming { get; set; } = true;
 
     public bool IsStreaming => !_sessions.IsEmpty;
+
+    /// <summary>Whether the phone said it plays Opus; older phones only get PCM.</summary>
+    public void SetAudioCodecs(string deviceId, IReadOnlyList<string>? codecs)
+    {
+        if (codecs?.Contains(OpusAudio.Codec) == true)
+        {
+            _opusDevices[deviceId] = 0;
+        }
+        else
+        {
+            _opusDevices.TryRemove(deviceId, out _);
+        }
+    }
 
     /// <summary>
     /// The phone's screen in its natural orientation. Warms up a landscape pipeline in the
@@ -349,6 +363,7 @@ public sealed class WindowStreamService : IDisposable
         private Pipeline? _pipeline;
         private WindowCapture? _capture;
         private AudioLoopback? _audio;
+        private OpusAudioEncoder? _opus;
         private KeepAwake? _keepAwake;
         private Timer? _idleRefresh;
         private Vortice.Direct3D11.ID3D11Texture2D? _lastNv12;
@@ -358,6 +373,7 @@ public sealed class WindowStreamService : IDisposable
         private (int Width, int Height) _content = (width, height);
         private byte[]? _savedPlacement;
         private bool _keyframeSent;
+        private volatile bool _hidden;
         private int _width = width, _height = height;
         private (int Width, int Height) _full = (width, height);
         private TimeSpan _lastProbe;
@@ -441,9 +457,25 @@ public sealed class WindowStreamService : IDisposable
             try
             {
                 _audio = AudioLoopback.ForWindow(window);
+
+                // Opus away from home, when the phone plays it: a tenth of the PCM's bitrate for the
+                // same sound. On the home Wi-Fi, PCM costs the phone less (see OpusAudio).
+                var opus = owner._opusDevices.ContainsKey(deviceId) && owner._channels.IsRemote(deviceId) ? new OpusAudioEncoder() : null;
+                _opus = opus;
                 _audio.Captured += (pcm, count) =>
-                    owner._channels.Send(deviceId, StreamChannel.Audio, StreamRecordFlags.None, (long)_clock.Elapsed.TotalMicroseconds, pcm[..count]);
+                {
+                    var at = (long)_clock.Elapsed.TotalMicroseconds;
+                    if (opus is null)
+                    {
+                        owner._channels.Send(deviceId, StreamChannel.Audio, StreamRecordFlags.None, at, pcm[..count]);
+                    }
+                    else
+                    {
+                        opus.Encode(pcm.AsSpan(0, count), packet => owner._channels.Send(deviceId, StreamChannel.Audio, StreamRecordFlags.Opus, at, packet));
+                    }
+                };
                 _audio.Start();
+                owner._diagnostics.Record(DiagnosticsCategory.Stream, "stream.audio", opus is null ? "pcm" : $"opus {OpusAudio.Bitrate / 1000} kbit/s", deviceId);
 
                 // The sound continues on the phone only. The capture takes the app's audio before
                 // the mixer's volume, so turning the app down here doesn't quiet the phone.
@@ -463,6 +495,23 @@ public sealed class WindowStreamService : IDisposable
         }
 
         public void RequestKeyframe() => _pipeline?.Encoder.RequestKeyframe();
+
+        private void SetHidden(bool hidden)
+        {
+            if (_hidden == hidden)
+            {
+                return;
+            }
+
+            _hidden = hidden;
+            owner._diagnostics.Record(DiagnosticsCategory.Stream, hidden ? "viewer.hidden" : "viewer.shown", title, deviceId);
+            if (!hidden)
+            {
+                // The next idle tick resends the latest picture, as a keyframe the decoder can start from.
+                _lastFrame = TimeSpan.FromDays(-1);
+                RequestKeyframe();
+            }
+        }
 
         /// <summary>The phone couldn't keep up and video was dropped: use less.</summary>
         public void FellBehind()
@@ -560,7 +609,13 @@ public sealed class WindowStreamService : IDisposable
                 }
 
                 _lastNv12 = nv12;
-                pipeline.Encoder.TryEncode(nv12, (long)now.TotalMicroseconds);
+
+                // Hidden on the phone: keep the latest picture for its return, but encode and send
+                // nothing, so its Wi-Fi radio can rest. Audio carries on.
+                if (!_hidden)
+                {
+                    pipeline.Encoder.TryEncode(nv12, (long)now.TotalMicroseconds);
+                }
             }
             catch (Exception ex)
             {
@@ -573,7 +628,8 @@ public sealed class WindowStreamService : IDisposable
             AdaptBitrate();
             var now = _clock.Elapsed;
             var interval = now < TimeSpan.FromSeconds(2) ? TimeSpan.FromMilliseconds(100) : TimeSpan.FromMilliseconds(500);
-            if (_lastNv12 is not { } nv12 || _pipeline is not { } pipeline || now - _lastFrame < interval || Volatile.Read(ref _stopped) != 0)
+            if (_lastNv12 is not { } nv12 || _pipeline is not { } pipeline || now - _lastFrame < interval
+                || _hidden || Volatile.Read(ref _stopped) != 0)
             {
                 return;
             }
@@ -696,6 +752,9 @@ public sealed class WindowStreamService : IDisposable
                 case KeyframeRequestMessage:
                     RequestKeyframe();
                     break;
+                case VisibilityMessage visibility:
+                    SetHidden(!visibility.Visible);
+                    break;
                 case RotateMessage rotate:
                     Rotate(rotate.Orientation == 1);
                     break;
@@ -753,6 +812,7 @@ public sealed class WindowStreamService : IDisposable
                 _idleRefresh?.Dispose();
                 _capture?.Dispose();
                 _audio?.Dispose();
+                _opus?.Dispose();
                 if (_mutedProcess is { } muted)
                 {
                     // Back on the PC: its sound comes back at the level it had.

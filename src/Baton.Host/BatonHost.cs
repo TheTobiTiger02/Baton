@@ -104,6 +104,7 @@ public sealed class BatonHost : IAsyncDisposable
             options.Listen(IPAddress.Loopback, HostIdentity.BrowserPort);
         });
         builder.Services.AddSingleton(Sessions);
+        builder.Services.AddSingleton(Diagnostics);
         builder.Services.AddHostedService<SessionStaleMonitor>();
         builder.Services.AddHostedService(_ => Endpoints);
 

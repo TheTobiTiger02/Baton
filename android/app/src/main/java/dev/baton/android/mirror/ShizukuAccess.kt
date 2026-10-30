@@ -45,14 +45,17 @@ object ShizukuAccess {
         Shizuku.UserServiceArgs(ComponentName(appContext!!.packageName, ShizukuShell::class.java.name))
             .daemon(false)
             .processNameSuffix("shell")
-            .version(1)
+            .version(2)
     }
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             shell = binder?.takeIf { it.pingBinder() }?.let { IShizukuShell.Stub.asInterface(it) }
             PhoneMirror.inputChanged()
-            scope.launch { settle() }
+            scope.launch {
+                settle()
+                syncSwipes()
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -87,8 +90,10 @@ object ShizukuAccess {
             else -> State.Ready
         }
         stateFlow.value = next
+        // Three-finger swipes need the helper too; binding alone grants nothing (see settle).
         val wanted = next == State.Ready &&
-            (BatonSettings.mirrorMode(context) == BatonSettings.MirrorMode.Shizuku || BatonSettings.revokePending(context))
+            (BatonSettings.mirrorMode(context) == BatonSettings.MirrorMode.Shizuku || BatonSettings.revokePending(context) ||
+                BatonSettings.swipes(context))
         if (wanted && !bound) {
             bound = runCatching { Shizuku.bindUserService(serviceArgs, connection) }
                 .onFailure { Log.w(TAG, "Could not start the Shizuku helper", it) }
@@ -128,6 +133,26 @@ object ShizukuAccess {
             // Only now may the helper go: the revoke above ran in it.
             refresh()
         }
+    }
+
+    /** The three-finger swipes switch changed: binds or unbinds the helper and starts or stops watching. */
+    fun swipesChanged() {
+        refresh()
+        scope.launch { syncSwipes() }
+    }
+
+    private val swipeListener = object : ISwipeListener.Stub() {
+        override fun onSwipe(dx: Float, dy: Float) {
+            appContext?.let { dev.baton.android.handoff.Swipes.onSwipe(it, dx, dy) }
+        }
+    }
+
+    /** Blocking: has the helper watch the touchscreen exactly while swipes are on. */
+    private fun syncSwipes() {
+        val context = appContext ?: return
+        val helper = shell ?: return
+        runCatching { if (BatonSettings.swipes(context)) helper.watchSwipes(swipeListener) else helper.stopSwipes() }
+            .onFailure { Log.w(TAG, "Could not change swipe watching", it) }
     }
 
     /** The "turn off Wireless debugging" switch changed: applies it now when Shizuku runs. */

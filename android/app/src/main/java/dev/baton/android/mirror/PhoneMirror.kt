@@ -34,6 +34,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
+import android.view.Surface
 import android.view.View
 import android.view.WindowManager
 import dev.baton.android.BatonSettings
@@ -198,6 +199,9 @@ class MirrorService : Service() {
     private var projection: MediaProjection? = null
     private var display: VirtualDisplay? = null
     private var codec: MediaCodec? = null
+    private var input: Surface? = null
+    /** False while the PC has the mirror window minimized: nothing is drawn or encoded then. */
+    private var shown = true
     private val bitrate = MirrorBitrate()
     private var mutedAudio = false
     private var drain: Thread? = null
@@ -263,9 +267,13 @@ class MirrorService : Service() {
 
         running = true
         val phoneInput = PhoneInput(this)
+        shown = true
         MediaChannel.controlSink = MediaSink { _, payload ->
-            val message = runCatching { ControlMessageCodec.decode(payload) }.getOrNull() ?: return@MediaSink
-            if (message is ControlMessage.KeyframeRequest) requestKeyframe() else main.post { phoneInput.apply(message) }
+            when (val message = runCatching { ControlMessageCodec.decode(payload) }.getOrNull() ?: return@MediaSink) {
+                is ControlMessage.KeyframeRequest -> requestKeyframe()
+                is ControlMessage.Visibility -> main.post { setShown(message.visible) }
+                else -> main.post { phoneInput.apply(message) }
+            }
         }
         startVideo()
         startAudio(projection)
@@ -380,15 +388,17 @@ class MirrorService : Service() {
         val surface = encoder.createInputSurface()
         encoder.start()
         codec = encoder
+        input = surface
+        if (!shown) suspend(encoder, true)
         // A projection may create only one virtual display (Android 14+): later sessions and
         // rotations resize it and give it the new encoder's surface.
         val existing = display
         if (existing == null) {
             display = projection!!.createVirtualDisplay("Baton mirror", width, height, resources.displayMetrics.densityDpi,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, surface, null, null)
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, surface.takeIf { shown }, null, null)
         } else {
             existing.resize(width, height, resources.displayMetrics.densityDpi)
-            existing.surface = surface
+            existing.surface = surface.takeIf { shown }
         }
         drain = Thread({ drain(encoder) }, "Baton mirror encoder").apply {
             priority = Thread.MAX_PRIORITY
@@ -444,6 +454,25 @@ class MirrorService : Service() {
         PhoneMirror.log("Mirror bitrate ${bitsPerSecond / 1_000_000.0} Mbps")
     }
 
+    /**
+     * The PC minimized or restored the mirror window. Hidden, the virtual display gets no surface
+     * (nothing is composed) and the encoder is suspended (no repeated frames either); shown again,
+     * it starts from a keyframe.
+     */
+    private fun setShown(visible: Boolean) {
+        if (!running || shown == visible) return
+        shown = visible
+        val encoder = codec ?: return
+        suspend(encoder, !visible)
+        runCatching { display?.surface = if (visible) input else null }
+        if (visible) requestKeyframe()
+        PhoneMirror.log(if (visible) "The PC shows the mirror again" else "The PC minimized the mirror: paused")
+    }
+
+    private fun suspend(encoder: MediaCodec, suspended: Boolean) {
+        runCatching { encoder.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_SUSPEND, if (suspended) 1 else 0) }) }
+    }
+
     private fun requestKeyframe() {
         runCatching { codec?.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0) }) }
     }
@@ -452,6 +481,7 @@ class MirrorService : Service() {
     private fun stopVideo() {
         val encoder = codec ?: return
         codec = null
+        input = null
         runCatching { display?.surface = null }
         drain?.join(500)
         drain = null
@@ -484,6 +514,11 @@ class MirrorService : Service() {
             runCatching { manager.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_MUTE, 0) }
             mutedAudio = true
         }
+        // Opus away from home, when the PC plays it: a tenth of the upload for the same sound.
+        val opus = if (Link.isRemote && dev.baton.android.stream.OpusAudio.CODEC in MediaChannel.pcAudioCodecs &&
+            dev.baton.android.stream.OpusAudio.canEncode)
+            runCatching { dev.baton.android.stream.OpusEncoder() }.getOrNull() else null
+        PhoneMirror.log(if (opus != null) "Mirror sound as Opus" else "Mirror sound as PCM")
         audio = Thread({
             val chunk = ByteArray(CHUNK_BYTES)
             try {
@@ -495,9 +530,17 @@ class MirrorService : Service() {
                         if (read < 0) return@Thread
                         filled += read
                     }
-                    MediaChannel.sendNow(StreamProtocol.CHANNEL_AUDIO, chunk, 0, SystemClock.elapsedRealtimeNanos() / 1000, 0, filled)
+                    val now = SystemClock.elapsedRealtimeNanos() / 1000
+                    if (opus == null) {
+                        MediaChannel.sendNow(StreamProtocol.CHANNEL_AUDIO, chunk, 0, now, 0, filled)
+                    } else {
+                        opus.encode(chunk, filled, now) { packet, size, at ->
+                            MediaChannel.sendNow(StreamProtocol.CHANNEL_AUDIO, packet, StreamProtocol.FLAG_OPUS, at, 0, size)
+                        }
+                    }
                 }
             } finally {
+                opus?.close()
                 runCatching { record.stop() }
                 record.release()
             }

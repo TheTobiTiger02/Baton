@@ -207,6 +207,21 @@ object HandoffEngine {
     }
 
     /**
+     * Continues the PC's top activity here, in the app chosen for it before: the one-tap "get from
+     * PC" of the Edge panel and the three-finger swipe down.
+     */
+    fun pullFromPc() {
+        val pc = Link.peers.value.firstOrNull { it.kind == "pc" }
+        val activity = pc?.activities?.firstOrNull()
+        if (pc == null || activity == null) {
+            Link.notice(HandoffNotice(Wire.newId(), "Your PC", if (pc == null) "Not connected to your PC." else "Nothing to continue from your PC.",
+                failed = true, done = true))
+            return
+        }
+        continueWith(activity, pc.deviceId, Link.deviceId)
+    }
+
+    /**
      * Continues [activity] (on [sourceDeviceId]) on [targetDeviceId] the way the user wants: with
      * the app they chose for it before, else after asking once which app (only when there is more
      * than one way). [ask] asks even when a choice is remembered, to change it.

@@ -14,7 +14,8 @@ public enum ControlMessageType : byte
     Rotate = 0x09,
     MouseMove = 0x0B,
     MouseButton = 0x0C,
-    Clipboard = 0x0D
+    Clipboard = 0x0D,
+    Visibility = 0x0E
 }
 
 public enum TouchAction : byte
@@ -76,6 +77,12 @@ public sealed record MouseButtonMessage(MouseButton Button, KeyAction Action) : 
 public sealed record ClipboardMessage(string Value) : ControlMessage;
 
 /// <summary>
+/// The viewer stopped or started showing the picture (minimized, phone screen off). Either
+/// direction: the sender stops encoding video meanwhile, and sends a keyframe once visible again.
+/// </summary>
+public sealed record VisibilityMessage(bool Visible) : ControlMessage;
+
+/// <summary>
 /// Input sent between the viewer and the device that is being shown, one message per media
 /// channel control record. Big-endian; <c>dev.baton.android.stream.ControlMessageCodec</c> is the
 /// byte-identical twin, pinned by parity tests on both sides.
@@ -135,6 +142,8 @@ public static class ControlMessages
                 return [(byte)ControlMessageType.Navigate, (byte)navigate.Target];
             case KeyframeRequestMessage:
                 return [(byte)ControlMessageType.KeyframeRequest];
+            case VisibilityMessage visibility:
+                return [(byte)ControlMessageType.Visibility, visibility.Visible ? (byte)1 : (byte)0];
             case RotateMessage rotate:
                 return [(byte)ControlMessageType.Rotate, (byte)rotate.Orientation];
             case MouseMoveMessage move:
@@ -188,6 +197,7 @@ public static class ControlMessages
             ControlMessageType.Clipboard => new ClipboardMessage(ReadText(body)),
             ControlMessageType.Navigate => new NavigateMessage((NavigationTarget)body[0]),
             ControlMessageType.KeyframeRequest => new KeyframeRequestMessage(),
+            ControlMessageType.Visibility => new VisibilityMessage(body[0] != 0),
             ControlMessageType.Rotate => new RotateMessage(body[0]),
             ControlMessageType.MouseMove => new MouseMoveMessage(
                 BinaryPrimitives.ReadInt32BigEndian(body),

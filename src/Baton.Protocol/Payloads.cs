@@ -55,8 +55,10 @@ public sealed record HeartbeatPayload(DateTimeOffset SentAt);
 /// <summary>
 /// About a phone. <see cref="ScreenWidth"/> x <see cref="ScreenHeight"/> is the screen in pixels in
 /// its natural (portrait) orientation; window streams are encoded to fit it exactly.
+/// <see cref="AudioCodecs"/> is the compressed audio it can play (<c>opus</c>); PCM always works.
 /// </summary>
-public sealed record DeviceInfoPayload(string DisplayName, string Model, int? BatteryLevel = null, int? ScreenWidth = null, int? ScreenHeight = null);
+public sealed record DeviceInfoPayload(string DisplayName, string Model, int? BatteryLevel = null, int? ScreenWidth = null, int? ScreenHeight = null,
+    IReadOnlyList<string>? AudioCodecs = null);
 
 public sealed record DeviceForgetPayload(string? Reason = null);
 
@@ -259,7 +261,8 @@ public static class StreamKinds
 /// per session so no stream ever waits for a handshake. The phone presents <see cref="Ticket"/>
 /// (base64) with <see cref="StreamId"/>; records carry their channel in the header.
 /// </summary>
-public sealed record MediaChannelPayload(string Ticket, ulong StreamId, int Port);
+/// <summary>The media socket to open; <see cref="AudioCodecs"/> is the compressed audio the PC can play.</summary>
+public sealed record MediaChannelPayload(string Ticket, ulong StreamId, int Port, IReadOnlyList<string>? AudioCodecs = null);
 
 /// <summary>Session-level stream commands: stop, return (continue on the source), fit, unfit.</summary>
 public sealed record StreamControlPayload(string SessionId, string Action, long? ElapsedMs = null);

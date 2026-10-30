@@ -9,5 +9,6 @@
     <PackageReference Include="Vortice.D3DCompiler" Version="3.6.2" />
     <PackageReference Include="Vortice.MediaFoundation" Version="3.6.2" />
     <PackageReference Include="Vortice.XAudio2" Version="3.6.2" />
+    <PackageReference Include="Concentus" Version="2.2.2" />
   </ItemGroup>
 </Project>

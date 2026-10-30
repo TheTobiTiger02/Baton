@@ -86,3 +86,44 @@ class ShareToPcActivity : Activity() {
         finish()
     }
 }
+
+/**
+ * Quick Settings tile: tap continues the PC's activity here, the way the three-finger swipe down
+ * does, on any phone and without Shizuku. It names what the PC is doing.
+ */
+class GetFromPcTileService : TileService() {
+    override fun onStartListening() {
+        val activity = Link.peers.value.firstOrNull { it.kind == "pc" }?.activities?.firstOrNull()
+        qsTile?.apply {
+            state = if (Link.isReady && activity != null) Tile.STATE_INACTIVE else Tile.STATE_UNAVAILABLE
+            subtitle = when {
+                !Link.isReady -> "Not connected"
+                activity == null -> "Nothing on your PC"
+                else -> activity.title
+            }
+            updateTile()
+        }
+    }
+
+    override fun onClick() {
+        if (!Link.isReady) return
+        // Through an activity of Baton's: the shade closes, and Android lets the app open from the front.
+        val intent = Intent(this, PullFromPcActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            startActivityAndCollapse(android.app.PendingIntent.getActivity(this, 0, intent,
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT))
+        } else {
+            @Suppress("DEPRECATION")
+            startActivityAndCollapse(intent)
+        }
+    }
+}
+
+/** Invisible: continues the PC's activity here, then gets out of the way. */
+class PullFromPcActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        HandoffEngine.pullFromPc()
+        finish()
+    }
+}

@@ -1,5 +1,6 @@
 package dev.baton.android.ui
 
+import androidx.lifecycle.repeatOnLifecycle
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.animation.animateContentSize
@@ -70,14 +71,20 @@ import dev.baton.android.protocol.Activity
 import dev.baton.android.protocol.ActivityKind
 import kotlinx.coroutines.delay
 
-/** Ticks once a second while composed, so progress bars of playing media move. */
+/**
+ * Ticks once a second while the screen is visible, so progress bars of playing media move. Stopped
+ * (another app in front, the screen off) it rests: every tick recomposes the screen.
+ */
 @Composable
 fun rememberNow(): Long {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(1_000)
-            now = System.currentTimeMillis()
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle) {
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            while (true) {
+                now = System.currentTimeMillis()
+                delay(1_000)
+            }
         }
     }
     return now

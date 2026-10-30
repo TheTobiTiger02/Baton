@@ -192,10 +192,16 @@ object Openers {
         if (positionMs == null || ContentLinks.isTwitchLive(activity.url)) return true
         reconcileScope.launch {
             MediaSessions.reconcile(
-                // By title: the app may still hold the video it showed before this one loads.
+                // By title: the app may still hold the video it showed before this one loads. A
+                // translated title (YouTube shows each viewer their own language) differs, so the
+                // same app playing something of the same length counts too.
                 matches = { controller ->
-                    val title = controller.metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
-                    titlesMatch(title, activity.title) || (title == null && controller.packageName == appPackage)
+                    val metadata = controller.metadata
+                    val title = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
+                    val length = dev.baton.android.protocol.Playback.plausibleDuration(
+                        metadata?.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION) ?: 0L)
+                    titlesMatch(title, activity.title) || (controller.packageName == appPackage &&
+                        (title == null || YouTubeResolver.sameLength(length, activity.playback?.durationMs ?: 0L)))
                 },
                 positionMs = positionMs,
                 play = true
