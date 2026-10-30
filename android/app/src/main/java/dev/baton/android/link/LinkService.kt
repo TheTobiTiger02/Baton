@@ -316,6 +316,7 @@ class LinkService : Service() {
             MessageTypes.HOST_ENDPOINTS -> {
                 val payload = envelope.read<HostEndpointsPayload>()
                 endpoints.replaceAnnounced(payload.hostId, payload.endpoints)
+                payload.wake?.let { WakeOnLan.remember(this, it) }
             }
             MessageTypes.HEARTBEAT_PING -> Link.send(MessageTypes.HEARTBEAT_PONG, HeartbeatPayload())
             MessageTypes.HEARTBEAT_PONG -> Unit

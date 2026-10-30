@@ -92,3 +92,12 @@ public class FileTransfersTests
         }
     }
 }
+
+public class WakeOnLanTests
+{
+    [Theory]
+    [InlineData("192.168.178.125", "255.255.255.0", "192.168.178.255")]
+    [InlineData("10.1.2.3", "255.255.0.0", "10.1.255.255")]
+    public void BroadcastAddressCoversTheWholeNetwork(string address, string mask, string broadcast) =>
+        Assert.Equal(broadcast, Baton.Host.EndpointEnumerator.Broadcast(System.Net.IPAddress.Parse(address), System.Net.IPAddress.Parse(mask)).ToString());
+}

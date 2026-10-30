@@ -150,7 +150,11 @@ data class DiscoveryResponse(
 )
 
 @Serializable
-data class HostEndpointsPayload(val hostId: String, val endpoints: List<HostEndpoint>)
+data class HostEndpointsPayload(val hostId: String, val endpoints: List<HostEndpoint>, val wake: List<WakeTarget>? = null)
+
+/** A PC network card's address (`AA:BB:CC:DD:EE:FF`) and its network's broadcast address. */
+@Serializable
+data class WakeTarget(val mac: String, val broadcast: String)
 
 @Serializable
 data class SessionChallengePayload(

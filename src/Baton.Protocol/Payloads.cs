@@ -13,7 +13,11 @@ public sealed record DiscoveryResponse(
 
 public sealed record HostEndpoint(string Host, int Port, string Kind, int Preference);
 
-public sealed record HostEndpointsPayload(string HostId, IReadOnlyList<HostEndpoint> Endpoints);
+/// <summary>Every address the PC answers on; <see cref="Wake"/> is how a phone on its network can wake it.</summary>
+public sealed record HostEndpointsPayload(string HostId, IReadOnlyList<HostEndpoint> Endpoints, IReadOnlyList<WakeTarget>? Wake = null);
+
+/// <summary>A network card's address (<c>AA:BB:CC:DD:EE:FF</c>) and its network's broadcast address, for Wake-on-LAN.</summary>
+public sealed record WakeTarget(string Mac, string Broadcast);
 
 public sealed record SessionChallengePayload(
     string ChallengeId,
