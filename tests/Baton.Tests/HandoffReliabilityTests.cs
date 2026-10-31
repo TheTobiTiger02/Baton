@@ -24,6 +24,40 @@ public class HandoffReliabilityTests
     }
 
     [Fact]
+    public void TheTimelineSurvivesARestartWithoutPicturesOrStaleEntries()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "baton-history-" + Guid.NewGuid().ToString("N") + ".dat");
+        try
+        {
+            var history = new HandoffHistory(path);
+            var video = new Activity("yt", "phone", ActivityKind.AppMedia, "Video", new ActivityApp("YouTube", "com.google.android.youtube"),
+                DateTimeOffset.UtcNow, ArtworkJpegBase64: "AAAA", Url: "https://www.youtube.com/watch?v=abc");
+            var intent = new HandoffIntent("phone", "pc", "yt", HandoffModes.Auto, null, video);
+            history.Observe(new HandoffEvent("done", "phone", "pc", "Video", HandoffStatus.Opened, "Opened"), intent);
+            history.Observe(new HandoffEvent("open", "pc", "phone", "Page", null, "Sending…"));
+            history.Observe(new HandoffEvent("old", "pc", "phone", "Old", HandoffStatus.Opened, null), now: DateTimeOffset.UtcNow.AddDays(-40));
+
+            // The file is encrypted: the title is nowhere in it.
+            Assert.DoesNotContain("Video", File.ReadAllText(path));
+
+            var restarted = new HandoffHistory(path);
+            var timeline = restarted.Timeline();
+            Assert.Equal(["open", "done"], timeline.Select(entry => entry.RequestId));
+            // What was in flight never got its answer; the picture stayed behind.
+            Assert.True(timeline[0].Unconfirmed);
+            Assert.Equal("https://www.youtube.com/watch?v=abc", timeline[1].Activity?.Url);
+            Assert.Null(timeline[1].Activity?.ArtworkJpegBase64);
+
+            restarted.Clear();
+            Assert.Empty(new HandoffHistory(path).Recent);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void TimeoutRemainsUncertainAndLateResultResolvesSameRecord()
     {
         var history = new HandoffHistory();

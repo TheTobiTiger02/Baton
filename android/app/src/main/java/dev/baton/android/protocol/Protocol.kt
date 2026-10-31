@@ -83,6 +83,8 @@ object MessageTypes {
     const val APP_CATALOG = "apps.catalog"
     const val APP_PREFERENCES = "apps.preferences"
     const val APP_PREFERENCE_REMOVE = "apps.preference.remove"
+    const val TIMELINE = "timeline"
+    const val TIMELINE_CLEAR = "timeline.clear"
 }
 
 object HandoffModes {
@@ -564,3 +566,20 @@ data class PairingLink(
         }
     }
 }
+
+/** One handoff in the timeline every device shares, as the PC keeps it; [activity] (without artwork) opens it again. */
+@Serializable
+data class TimelineEntry(
+    val requestId: String,
+    val title: String,
+    val startedAt: String,
+    val sourceDeviceId: String,
+    val targetDeviceId: String,
+    val status: HandoffStatus? = null,
+    val detail: String? = null,
+    val unconfirmed: Boolean = false,
+    val activity: Activity? = null
+)
+
+@Serializable
+data class TimelinePayload(val entries: List<TimelineEntry>)

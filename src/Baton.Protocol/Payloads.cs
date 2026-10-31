@@ -303,6 +303,24 @@ public sealed record HandoffDeliverPayload(
 /// </summary>
 public sealed record StreamOffer(string SessionId, int Width, int Height, string Title, string Kind = StreamKinds.Window);
 
+/// <summary>
+/// One handoff in the timeline every device shares: what moved, from which device to which, when,
+/// and how it ended. <see cref="Activity"/> (without artwork) lets any device open it again.
+/// </summary>
+public sealed record TimelineEntry(
+    string RequestId,
+    string Title,
+    DateTimeOffset StartedAt,
+    string SourceDeviceId,
+    string TargetDeviceId,
+    HandoffStatus? Status,
+    string? Detail,
+    bool Unconfirmed = false,
+    Activity? Activity = null);
+
+/// <summary>The recent handoffs, newest first.</summary>
+public sealed record TimelinePayload(IReadOnlyList<TimelineEntry> Entries);
+
 public enum HandoffStatus
 {
     /// <summary>Continued the way the activity asked for.</summary>
