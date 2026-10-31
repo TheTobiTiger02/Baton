@@ -13,7 +13,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** The paired PC. [trustKey] never leaves the phone after pairing; it only keys the session proof. */
+/** The paired PC. [trustKey] never leaves the phone after pairing; it keys the session proof and the nearby signal ([NearbyBeacon]). */
 data class TrustedHost(
     val hostId: String,
     val pcName: String,

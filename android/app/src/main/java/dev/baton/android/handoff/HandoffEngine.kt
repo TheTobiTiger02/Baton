@@ -10,6 +10,7 @@ import android.os.SystemClock
 import android.util.Log
 import dev.baton.android.BatonSettings
 import dev.baton.android.link.HandoffNotice
+import dev.baton.android.link.LinkDiagnostics
 import dev.baton.android.link.Link
 import dev.baton.android.protocol.TimelinePayload
 import dev.baton.android.protocol.TimelineEntry
@@ -179,12 +180,38 @@ object HandoffEngine {
         if (suggestions.tryOffer(pc.deviceId, activity)) BatonNotifications.suggestion(context, pc, activity)
     }
 
+    /** Offered because this phone left the PC: the PC still counts as in use for a while after. */
+    @Volatile private var offeredOnLeaving = false
+
+    /**
+     * The PC noticed this phone move away (it was carried off, so offer what the PC showed here)
+     * or come back (that offer is stale). Only ever an offer, as on unlock.
+     */
+    fun onProximity(context: Context, near: Boolean) {
+        LinkDiagnostics.record(if (near) "nearby.near" else "nearby.away")
+        if (near) {
+            if (offeredOnLeaving) BatonNotifications.cancelSuggestion(context)
+            offeredOnLeaving = false
+            return
+        }
+        if (!BatonSettings.suggestFromPc(context)) return
+        val pc = Link.peers.value.firstOrNull { it.kind == "pc" } ?: return
+        // Just left: what the PC showed a moment ago counts, though it may still be "in use".
+        val activity = Suggestions.pick(pc.activities, PresenceState.Idle) ?: return
+        if (suggestions.tryOffer(pc.deviceId, activity)) {
+            BatonNotifications.suggestion(context, pc, activity)
+            offeredOnLeaving = true
+        }
+    }
+
     /** The offer is stale once the user is back at the PC or the activity is gone there. */
     private fun withdrawStaleSuggestion(context: Context, peers: List<dev.baton.android.protocol.PeerInfo>) {
         val offered = BatonNotifications.suggested ?: return
         val pc = peers.firstOrNull { it.deviceId == offered.first }
-        if (pc == null || pc.presence == PresenceState.Active || pc.activities.none { it.id == offered.second }) {
+        val backAtPc = pc?.presence == PresenceState.Active && !offeredOnLeaving
+        if (pc == null || backAtPc || pc.activities.none { it.id == offered.second }) {
             BatonNotifications.cancelSuggestion(context)
+            offeredOnLeaving = false
         }
     }
 

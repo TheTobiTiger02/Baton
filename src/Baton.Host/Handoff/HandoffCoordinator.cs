@@ -293,11 +293,12 @@ public sealed class HandoffCoordinator : IDisposable
     /// What to offer someone returning to this PC (see <see cref="HandoffSuggestions.Pick"/>), or
     /// null. An activity is offered once per <see cref="HandoffSuggestions.RepeatAfter"/>.
     /// </summary>
-    public (DeviceView Device, Activity Activity)? SuggestionForReturn()
+    /// <summary>What to offer from a phone (from <paramref name="deviceId"/> only, when given), at most once in a while.</summary>
+    public (DeviceView Device, Activity Activity)? SuggestionForReturn(string? deviceId = null)
     {
         var now = DateTimeOffset.UtcNow;
         var best = GetDevices()
-            .Where(device => device.Kind == DeviceKinds.Phone && device.Online)
+            .Where(device => device.Kind == DeviceKinds.Phone && device.Online && (deviceId is null || device.DeviceId == deviceId))
             .Select(device => (Device: device, Activity: HandoffSuggestions.Pick(device.Activities, device.Presence, now)))
             .Where(pair => pair.Activity is not null)
             .OrderByDescending(pair => pair.Activity!.Playback?.Playing == true)

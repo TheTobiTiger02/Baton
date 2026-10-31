@@ -8,6 +8,7 @@ object BatonSettings {
     private const val SUGGEST_FROM_PC = "suggest_from_pc"
     private const val SYNC_CLIPBOARD = "sync_clipboard"
     private const val WAKE_RELAY = "wake_relay"
+    private const val NEARBY = "nearby"
     private const val MIRROR_MODE = "mirror_mode"
     private const val WIRELESS_DEBUGGING_OFF = "wireless_debugging_off"
     private const val REVOKE_PENDING = "revoke_pending"
@@ -41,6 +42,11 @@ object BatonSettings {
     fun wakeRelay(context: Context): Boolean = prefs(context).getBoolean(WAKE_RELAY, false)
 
     fun setWakeRelay(context: Context, value: Boolean) = prefs(context).edit().putBoolean(WAKE_RELAY, value).apply()
+
+    /** The PC may notice this phone nearby over Bluetooth, to time its suggestions. */
+    fun nearby(context: Context): Boolean = prefs(context).getBoolean(NEARBY, false)
+
+    fun setNearby(context: Context, value: Boolean) = prefs(context).edit().putBoolean(NEARBY, value).apply()
 
     fun mirrorMode(context: Context): MirrorMode =
         prefs(context).getString(MIRROR_MODE, null)?.let { name -> MirrorMode.entries.firstOrNull { it.name == name } }

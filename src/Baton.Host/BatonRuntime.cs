@@ -49,6 +49,16 @@ public sealed class BatonRuntime : IAsyncDisposable
             CaptureBrowserReturnTarget = Browser.CaptureReturnTarget
         };
         Presence.Changed += Coordinator.SetLocalPresence;
+        Nearby = new NearbyDevices(Host.Devices, Host.Diagnostics);
+        Nearby.Changed += (deviceId, near) =>
+        {
+            _ = Host.SendAsync(deviceId, MessageTypes.Proximity, new ProximityPayload(near));
+            // Sat down with the phone: offer what it was doing. While locked, unlocking offers it instead.
+            if (near && Presence.State != PresenceState.Locked && Coordinator.SuggestionForReturn(deviceId) is { } suggestion)
+            {
+                WelcomeBack?.Invoke(suggestion.Device, suggestion.Activity);
+            }
+        };
         Presence.Returned += away =>
         {
             if (Coordinator.SuggestionForReturn() is { } suggestion)
@@ -109,6 +119,9 @@ public sealed class BatonRuntime : IAsyncDisposable
     public Baton.Host.Apps.AppDirectory Apps { get; }
     public PresenceMonitor Presence { get; } = new();
 
+    /// <summary>Phones near this PC, from their Bluetooth signal.</summary>
+    public NearbyDevices Nearby { get; }
+
     /// <summary>
     /// The user came back to this PC while a phone is playing something: offer to continue it
     /// here. Any thread.
@@ -119,6 +132,7 @@ public sealed class BatonRuntime : IAsyncDisposable
     {
         await Host.StartAsync();
         await Media.StartAsync();
+        Nearby.Start();
         _ = Apps.Pc.RefreshAsync();
     }
 
@@ -129,6 +143,7 @@ public sealed class BatonRuntime : IAsyncDisposable
     {
         Coordinator.Dispose();
         Presence.Dispose();
+        Nearby.Dispose();
         Windows.Dispose();
         Media.Dispose();
         await Host.DisposeAsync();

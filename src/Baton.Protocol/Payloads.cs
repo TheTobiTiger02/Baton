@@ -321,6 +321,9 @@ public sealed record TimelineEntry(
 /// <summary>The recent handoffs, newest first.</summary>
 public sealed record TimelinePayload(IReadOnlyList<TimelineEntry> Entries);
 
+/// <summary>The PC noticed the phone come near it (true) or go away (false).</summary>
+public sealed record ProximityPayload(bool Near);
+
 public enum HandoffStatus
 {
     /// <summary>Continued the way the activity asked for.</summary>

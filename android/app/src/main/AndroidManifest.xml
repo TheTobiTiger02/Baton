@@ -15,6 +15,10 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Optional: a WhatsApp chat's number, from the contact's name, to open that chat on the PC. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Optional: a quiet Bluetooth signal so the PC notices this phone nearby (NearbyBeacon). -->
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />

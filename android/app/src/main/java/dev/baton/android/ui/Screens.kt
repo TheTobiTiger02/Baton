@@ -899,6 +899,7 @@ fun SettingsScreen(trust: TrustStore, grants: Grants, onBack: (() -> Unit)?) {
             }
             SettingsPage.Handoff -> {
                 item { SuggestionSetting() }
+                item { NearbySetting() }
                 item { NotificationsSetting() }
                 item { ClipboardSetting() }
             }

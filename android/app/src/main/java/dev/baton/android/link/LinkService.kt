@@ -18,6 +18,7 @@ import android.os.PowerManager
 import android.util.Log
 import dev.baton.android.BatonSettings
 import dev.baton.android.handoff.HandoffEngine
+import dev.baton.android.protocol.ProximityPayload
 import dev.baton.android.protocol.DeviceForgetPayload
 import dev.baton.android.protocol.DeviceInfoPayload
 import dev.baton.android.protocol.Envelope
@@ -153,7 +154,7 @@ class LinkService : Service() {
         }, ContextCompat.RECEIVER_NOT_EXPORTED)
         HandoffEngine.start(this)
         PcRemote.start(this)
-        if (BatonSettings.wakeRelay(this)) WakeRelay.start(this)
+        applyDeviceRoles()
         dev.baton.android.mirror.ShizukuAccess.init(this)
     }
 
@@ -175,8 +176,8 @@ class LinkService : Service() {
                     connecting = false
                 }
             }
-            ACTION_WAKE_RELAY -> {
-                if (BatonSettings.wakeRelay(this)) WakeRelay.start(this) else WakeRelay.stop()
+            ACTION_SETTINGS -> {
+                applyDeviceRoles()
                 if (Link.isReady) sendDeviceInfo()
                 return START_STICKY
             }
@@ -205,6 +206,7 @@ class LinkService : Service() {
         HandoffEngine.stop()
         PcRemote.stop()
         WakeRelay.stop()
+        NearbyBeacon.stop()
         releaseLocks()
         scope.cancel()
         Link.setStatus(LinkStatus(if (trust.isPaired) LinkPhase.Offline else LinkPhase.Unpaired, "Stopped"))
@@ -343,6 +345,7 @@ class LinkService : Service() {
             MessageTypes.FILE_RESULT -> dev.baton.android.transfer.FileTransfers.onResult(this, envelope.read())
             MessageTypes.FOLDER_LISTING -> dev.baton.android.transfer.PcFiles.onListing(envelope.read())
             MessageTypes.TIMELINE -> HandoffEngine.onTimeline(envelope.read())
+            MessageTypes.PROXIMITY -> HandoffEngine.onProximity(this, envelope.read<ProximityPayload>().near)
             MessageTypes.DEVICE_RING -> {
                 LinkDiagnostics.record("ring")
                 dev.baton.android.remote.PhoneRinger.ring(this, envelope.read<dev.baton.android.protocol.RingPayload>().seconds)
@@ -386,6 +389,7 @@ class LinkService : Service() {
         // The pin comes from the QR code (or discovery), never from this message: a PC that
         // could change it here would not need to be trusted in the first place.
         trust.save(TrustedHost(link.hostId, confirm.pcName, link.certificateFingerprint, confirm.trustKey))
+        applyDeviceRoles()
         currentEndpoint?.let { endpoints.remember(link.hostId, it.host, it.port) }
         AutoConnectReceiver.enable(this)
     }
@@ -485,10 +489,18 @@ class LinkService : Service() {
         ).filter { capabilities.hasTransport(it.first) }.joinToString("+") { it.second }.ifEmpty { "other" }
     }
 
+    /** What this device does for the others besides the link: wake the PC, and let it notice this phone nearby. */
+    private fun applyDeviceRoles() {
+        if (BatonSettings.wakeRelay(this)) WakeRelay.start(this) else WakeRelay.stop()
+        val host = trust.host
+        if (host != null && BatonSettings.nearby(this)) NearbyBeacon.start(this, host.trustKey) else NearbyBeacon.stop()
+    }
+
     private fun forgetLocally() {
         LinkDiagnostics.record("unpaired")
         pairing = null
         trust.forget()
+        NearbyBeacon.stop()
         client.disconnect("Forgotten")
         Link.setPeers(emptyList())
         Link.setStatus(LinkStatus(LinkPhase.Unpaired, "This phone is no longer paired."))
@@ -550,7 +562,7 @@ class LinkService : Service() {
         const val ACTION_PAIR = "dev.baton.android.PAIR"
         const val ACTION_FORGET = "dev.baton.android.FORGET"
         const val ACTION_STOP = "dev.baton.android.STOP"
-        const val ACTION_WAKE_RELAY = "dev.baton.android.WAKE_RELAY"
+        const val ACTION_SETTINGS = "dev.baton.android.SETTINGS"
         const val EXTRA_LINK = "link"
 
         fun start(context: Context) {
@@ -562,9 +574,9 @@ class LinkService : Service() {
             context.startForegroundService(Intent(context, LinkService::class.java).setAction(ACTION_PAIR).putExtra(EXTRA_LINK, raw))
         }
 
-        /** The wake relay setting changed: listen (or stop) and tell the PC. */
-        fun wakeRelayChanged(context: Context) {
-            context.startService(Intent(context, LinkService::class.java).setAction(ACTION_WAKE_RELAY))
+        /** The wake relay or nearby setting changed: start or stop them, and tell the PC. */
+        fun settingsChanged(context: Context) {
+            context.startService(Intent(context, LinkService::class.java).setAction(ACTION_SETTINGS))
         }
 
         fun forget(context: Context) {

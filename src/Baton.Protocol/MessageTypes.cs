@@ -60,4 +60,7 @@ public static class MessageTypes
     /// <summary>The PC sends every device the recent handoffs; a device asks it to clear them.</summary>
     public const string Timeline = "timeline";
     public const string TimelineClear = "timeline.clear";
+
+    /// <summary>The PC noticed a phone come near it or go away, from the phone's Bluetooth signal.</summary>
+    public const string Proximity = "proximity";
 }

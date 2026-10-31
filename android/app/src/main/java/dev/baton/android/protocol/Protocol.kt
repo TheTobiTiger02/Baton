@@ -85,6 +85,7 @@ object MessageTypes {
     const val APP_PREFERENCE_REMOVE = "apps.preference.remove"
     const val TIMELINE = "timeline"
     const val TIMELINE_CLEAR = "timeline.clear"
+    const val PROXIMITY = "proximity"
 }
 
 object HandoffModes {
@@ -583,3 +584,7 @@ data class TimelineEntry(
 
 @Serializable
 data class TimelinePayload(val entries: List<TimelineEntry>)
+
+/** The PC noticed this phone come near it, or move away (from its Bluetooth signal, [dev.baton.android.link.NearbyBeacon]). */
+@Serializable
+data class ProximityPayload(val near: Boolean)

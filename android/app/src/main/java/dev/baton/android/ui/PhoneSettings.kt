@@ -83,6 +83,47 @@ fun SuggestionSetting() {
     }
 }
 
+/**
+ * "Notice when I'm at my PC": a quiet Bluetooth signal lets the PC tell when this phone comes near
+ * or leaves, so suggestions come at the right moment. It only times suggestions; nothing moves by itself.
+ */
+@Composable
+fun NearbySetting() {
+    val context = LocalContext.current
+    var enabled by remember { mutableStateOf(BatonSettings.nearby(context) && dev.baton.android.link.NearbyBeacon.hasPermission(context)) }
+
+    fun apply(value: Boolean) {
+        enabled = value
+        BatonSettings.setNearby(context, value)
+        dev.baton.android.link.LinkService.settingsChanged(context)
+    }
+
+    val permission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted -> if (granted) apply(true) }
+
+    fun set(value: Boolean) {
+        if (value && !dev.baton.android.link.NearbyBeacon.hasPermission(context) && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            permission.launch(android.Manifest.permission.BLUETOOTH_ADVERTISE)
+        } else {
+            apply(value)
+        }
+    }
+
+    SettingsCardColumn {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { set(!enabled) }) {
+            Column(Modifier.weight(1f)) {
+                Text("Notice when I'm at my PC", style = MaterialTheme.typography.titleMedium)
+                Text("A quiet Bluetooth signal tells your PC when this phone comes near or goes away. Walk off and this phone " +
+                    "offers what the PC was showing; sit down and the PC offers what this phone was doing. It only suggests, " +
+                    "and the signal changes every 15 minutes, so only your PC recognises it.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.width(Tokens.Space3))
+            Switch(checked = enabled, onCheckedChange = ::set)
+        }
+    }
+}
+
 /** "Notifications on your PC", and the apps whose notifications stay here. */
 @Composable
 fun NotificationsSetting() {
@@ -365,7 +406,7 @@ fun WakeRelaySetting() {
     fun set(value: Boolean) {
         enabled = value
         BatonSettings.setWakeRelay(context, value)
-        dev.baton.android.link.LinkService.wakeRelayChanged(context)
+        dev.baton.android.link.LinkService.settingsChanged(context)
     }
 
     SettingsCardColumn {
