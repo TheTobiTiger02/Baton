@@ -42,6 +42,12 @@ public class AppMatcherTests
         Assert.Null(Baton.Host.Media.ContentLinks.ForApp("whatsapp", "https://wa.me/notanumber"));
         Assert.Null(Baton.Host.Media.ContentLinks.ForApp("tg", "https://wa.me/4915123456789"));
 
+        // A group has no link: WhatsApp still comes first, where the PC searches for it by name.
+        var group = chat with { Url = null, Title = "Chat with Climbing", Content = new ActivityContent("whatsapp", Query: "Climbing") };
+        options = Options(group, Platforms.Android, Platforms.Windows, Pc);
+        Assert.Equal((ChoiceKinds.App, "WhatsApp"), (options[0].Kind, options[0].Label));
+        Assert.Contains(options, option => option.Kind == ChoiceKinds.Web);
+
         // A place in Google Maps: there is no Maps app on the PC, so the browser.
         var place = new Activity("page:com.google.android.apps.maps", "phone", ActivityKind.WebPage, "Brandenburg Gate",
             new ActivityApp("Maps", "com.google.android.apps.maps"), DateTimeOffset.UtcNow,

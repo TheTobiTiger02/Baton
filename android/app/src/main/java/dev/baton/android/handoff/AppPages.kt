@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.provider.ContactsContract
 import android.view.accessibility.AccessibilityNodeInfo
+import dev.baton.android.protocol.ActivityContent
 
 /**
  * What an app shows, as a link another device can open: the place or route in Google Maps, the
@@ -12,13 +13,18 @@ import android.view.accessibility.AccessibilityNodeInfo
  * and offered the same way ([BrowserPages]). Apps change their screens, so each reader looks for
  * labels that have stayed put for years and gives up quietly when they're gone.
  */
+/** What an app shows: a link to it when there is one, and what it is ([content]: a chat's name). */
+data class AppPage(val url: String?, val title: String, val content: ActivityContent? = null)
+
 object AppPages {
+    /** A WhatsApp chat by name ([ActivityContent.query]), for chats no link opens. */
+    const val WHATSAPP_PROVIDER = "whatsapp"
     const val MAPS = "com.google.android.apps.maps"
     const val WHATSAPP = "com.whatsapp"
     val packages = setOf(MAPS, WHATSAPP)
 
     /** A link and a title for what [root] shows, or null when there is nothing to carry over. */
-    fun read(context: Context, packageName: String, root: AccessibilityNodeInfo): Pair<String, String>? = when (packageName) {
+    fun read(context: Context, packageName: String, root: AccessibilityNodeInfo): AppPage? = when (packageName) {
         MAPS -> maps(root)
         WHATSAPP -> whatsApp(context, root)
         else -> null
@@ -29,38 +35,44 @@ object AppPages {
     private const val MAPS_ID = "$MAPS:id/"
     private const val NOTHING_SEARCHED = "Search here"
 
-    private fun maps(root: AccessibilityNodeInfo): Pair<String, String>? {
+    private fun maps(root: AccessibilityNodeInfo): AppPage? {
         val labels = labels(root)
         // A route: the start and destination fields say what they are.
         val destination = labels.firstNotNullOfOrNull { it.removePrefixOrNull("Destination, ") }
         if (destination != null) {
             val start = labels.firstNotNullOfOrNull { it.removePrefixOrNull("Start location, ") }
             val mode = labels.firstOrNull { it.selected && it.text.contains(" mode: ") }?.text?.substringBefore(" mode:")
-            return MapsLinks.directions(start, destination, mode) to "Directions to $destination"
+            return AppPage(MapsLinks.directions(start, destination, mode), "Directions to $destination")
         }
         // A place: its card offers directions to it, by name and address.
         labels.firstNotNullOfOrNull { it.removePrefixOrNull("Directions to ") }?.let { place ->
-            return MapsLinks.search(place) to place.substringBefore(", ")
+            return AppPage(MapsLinks.search(place), place.substringBefore(", "))
         }
         // A search, while it isn't being typed.
         val box = root.findAccessibilityNodeInfosByViewId("${MAPS_ID}search_omnibox_text_box").firstOrNull() ?: return null
         val query = box.text?.toString()?.trim()
         if (box.isFocused || query.isNullOrEmpty() || query == NOTHING_SEARCHED) return null
-        return MapsLinks.search(query) to query
+        return AppPage(MapsLinks.search(query), query)
     }
 
     // ---- WhatsApp ----
 
     private const val WHATSAPP_ID = "$WHATSAPP:id/"
 
-    /** The open chat, when its number is known: shown as the title, or a contact's on this phone. */
-    private fun whatsApp(context: Context, root: AccessibilityNodeInfo): Pair<String, String>? {
+    /**
+     * The open chat. With a number (shown as the title, or a contact's on this phone) it is a link
+     * to that chat; a group or a contact without one has no link anywhere, so it goes by name and
+     * the other device looks it up in WhatsApp's own search.
+     */
+    private fun whatsApp(context: Context, root: AccessibilityNodeInfo): AppPage? {
         val name = root.findAccessibilityNodeInfosByViewId("${WHATSAPP_ID}conversation_contact_name").firstOrNull()
             ?.text?.toString()?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        val number = ChatLinks.numberIn(name) ?: contactNumber(context, name) ?: return null
+        val content = ActivityContent(WHATSAPP_PROVIDER, query = name)
+        val number = ChatLinks.numberIn(name) ?: contactNumber(context, name)
+            ?: return AppPage(null, "Chat with $name", content)
         val draft = root.findAccessibilityNodeInfosByViewId("${WHATSAPP_ID}entry").firstOrNull()
             ?.takeUnless { it.isShowingHintText }?.text?.toString()
-        return ChatLinks.whatsApp(number, draft) to "Chat with $name"
+        return AppPage(ChatLinks.whatsApp(number, draft), "Chat with $name", content)
     }
 
     /** The number saved for a contact with exactly this name; needs the contacts permission. */

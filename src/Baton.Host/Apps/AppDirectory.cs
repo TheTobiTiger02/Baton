@@ -188,6 +188,15 @@ public sealed class AppDirectory
                 }
 
                 Launch(id);
+
+                // A chat no link opens (a WhatsApp group): WhatsApp's own search finds it.
+                if (url is null && known?.Provider == "whatsapp" && activity.Content is { Provider: "whatsapp", Query: { Length: > 0 } chat })
+                {
+                    _ = ChatSearch.WhatsAppAsync(chat);
+                    detail = $"Opened WhatsApp and searched for {chat}: pick the chat there.";
+                    return HandoffStatus.Fallback;
+                }
+
                 if (url is not null)
                 {
                     detail = $"Opened {choice.Label}; it can't be given the page itself.";

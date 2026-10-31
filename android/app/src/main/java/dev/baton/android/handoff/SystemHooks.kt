@@ -102,7 +102,7 @@ class BatonAccessibilityService : AccessibilityService() {
             appPageQueued = false
             val root = rootInActiveWindow ?: return@postDelayed
             if (root.packageName?.toString() != packageName) return@postDelayed
-            AppPages.read(this, packageName, root)?.let { (url, title) -> BrowserPages.onPage(packageName, url, title) }
+            AppPages.read(this, packageName, root)?.let { BrowserPages.onPage(packageName, it.url, it.title, it.content) }
         }, APP_PAGE_DELAY_MS)
     }
 
