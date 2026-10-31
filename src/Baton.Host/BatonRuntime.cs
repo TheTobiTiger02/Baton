@@ -50,6 +50,14 @@ public sealed class BatonRuntime : IAsyncDisposable
         };
         Presence.Changed += Coordinator.SetLocalPresence;
         Nearby = new NearbyDevices(Host.Devices, Host.Diagnostics);
+        // A phone changing Wi-Fi as it walks off reconnects: what it missed meanwhile is sent again.
+        Host.DeviceConnectionChanged += (deviceId, connected) =>
+        {
+            if (connected && Nearby.IsNear(deviceId) is { } near)
+            {
+                _ = Host.SendAsync(deviceId, MessageTypes.Proximity, new ProximityPayload(near));
+            }
+        };
         Nearby.Changed += (deviceId, near) =>
         {
             _ = Host.SendAsync(deviceId, MessageTypes.Proximity, new ProximityPayload(near));

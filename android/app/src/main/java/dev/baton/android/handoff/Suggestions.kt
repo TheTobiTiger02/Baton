@@ -11,15 +11,23 @@ import dev.baton.android.protocol.Wire
 class Suggestions {
     private val offered = HashMap<String, Long>()
 
+    /** Forgets that [activity] was offered, so it can be offered again (the offer was withdrawn unseen). */
+    @Synchronized
+    fun forget(deviceId: String, activity: Activity) {
+        offered.remove(key(deviceId, activity))
+    }
+
     /** Records [activity] as offered; false when it already was within [REPEAT_AFTER_MS]. */
     @Synchronized
     fun tryOffer(deviceId: String, activity: Activity, nowMs: Long = System.currentTimeMillis()): Boolean {
         offered.entries.removeAll { nowMs - it.value >= REPEAT_AFTER_MS }
-        val key = "$deviceId\n${activity.id}\n${activity.title}"
+        val key = key(deviceId, activity)
         if (key in offered) return false
         offered[key] = nowMs
         return true
     }
+
+    private fun key(deviceId: String, activity: Activity) = "$deviceId\n${activity.id}\n${activity.title}"
 
     companion object {
         /** Something that stopped longer ago than this is not what the user was just doing. */

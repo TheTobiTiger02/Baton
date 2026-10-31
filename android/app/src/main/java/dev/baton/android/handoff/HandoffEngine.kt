@@ -184,6 +184,7 @@ object HandoffEngine {
 
     /** Offered because this phone left the PC: the PC still counts as in use for a while after. */
     @Volatile private var offeredOnLeaving = false
+    @Volatile private var leavingOffer: Pair<String, Activity>? = null
 
     /**
      * The PC noticed this phone move away (it was carried off, so offer what the PC showed here)
@@ -194,6 +195,9 @@ object HandoffEngine {
         if (near) {
             if (offeredOnLeaving) BatonNotifications.cancelSuggestion(context)
             offeredOnLeaving = false
+            // Back before taking it up: walking off again offers it again.
+            leavingOffer?.let { (pcId, activity) -> suggestions.forget(pcId, activity) }
+            leavingOffer = null
             return
         }
         if (!BatonSettings.suggestFromPc(context)) return
@@ -204,6 +208,7 @@ object HandoffEngine {
             // Marked first: the device list can update while the offer goes up, and the PC still
             // counts as in use, which would read as being back at it and withdraw the offer at once.
             offeredOnLeaving = true
+            leavingOffer = pc.deviceId to activity
             // Walking off, the phone is likely in a pocket: it waits until looked at, or until back at the PC.
             BatonNotifications.suggestion(context, pc, activity, lastsMs = LEAVING_OFFER_MS)
         }

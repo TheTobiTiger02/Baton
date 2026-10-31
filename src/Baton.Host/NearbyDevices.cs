@@ -116,7 +116,10 @@ public sealed class NearbyDevices : IDisposable
         var signal = _signals.GetOrAdd(deviceId, _ => new Signal());
         lock (signal)
         {
-            signal.Strength = signal.Strength is { } previous ? previous * 0.7 + rssi * 0.3 : rssi;
+            // After a silence the old strength says nothing about where the phone is now: one faint
+            // reading from the next room must not count as close because the last ones before it were.
+            var fresh = signal.Strength is null || now - signal.HeardAt > GoneAfter;
+            signal.Strength = fresh ? rssi : signal.Strength * 0.7 + rssi * 0.3;
             signal.HeardAt = now;
         }
 

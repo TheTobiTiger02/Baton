@@ -38,8 +38,13 @@ public class NearbyDevicesTests
         Assert.Equal([("phone", false), ("phone", true)], changes);
 
         // Silence is going away too: out of range, or Bluetooth off.
-        nearby.Evaluate(now.AddSeconds(29) + NearbyDevices.GoneAfter + TimeSpan.FromSeconds(1));
+        var gone = now.AddSeconds(29) + NearbyDevices.GoneAfter + TimeSpan.FromSeconds(1);
+        nearby.Evaluate(gone);
         Assert.Equal(("phone", false), changes[^1]);
+
+        // A faint reading from the next room after the silence isn't coming back, whatever came before.
+        nearby.Observe("phone", -84, gone.AddSeconds(5));
+        Assert.False(nearby.IsNear("phone"));
         Assert.Null(nearby.IsNear("tablet"));
     }
 }
