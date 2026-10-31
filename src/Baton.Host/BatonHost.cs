@@ -31,7 +31,9 @@ public sealed class BatonHost : IAsyncDisposable
         Identity = HostIdentity.LoadOrCreate(StorageDirectory);
         Devices = new DeviceRegistry(Path.Combine(StorageDirectory, "devices.json"));
         DeviceNames = new DeviceNames(Path.Combine(StorageDirectory, "device-names.json"));
-        Endpoints = new EndpointEnumerator(Sessions, Identity, Diagnostics);
+        WakeRelays = new WakeRelays(Path.Combine(StorageDirectory, "wake-relays.json"));
+        Endpoints = new EndpointEnumerator(Sessions, Identity, Diagnostics, ListWakeRelays);
+        WakeRelays.Changed += () => _ = Endpoints.AnnounceAsync();
         StreamListener = new StreamListener(Identity, StreamTickets, Diagnostics,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<StreamListener>.Instance);
         Timeline = new HandoffTimeline(Diagnostics);
@@ -47,6 +49,15 @@ public sealed class BatonHost : IAsyncDisposable
     }
 
     public HandoffTimeline Timeline { get; }
+
+    /// <summary>Devices that wake this PC for the others while it sleeps.</summary>
+    public WakeRelays WakeRelays { get; }
+
+    /// <summary>The relays still paired, by the name the user knows them by.</summary>
+    private IReadOnlyList<WakeRelay> ListWakeRelays() => WakeRelays.All
+        .Where(relay => Devices.GetDevice(relay.Key) is not null)
+        .Select(relay => new WakeRelay(relay.Key, NameOf(relay.Key) ?? "Device", relay.Value))
+        .ToArray();
 
     /// <summary>Names given to phones on this PC.</summary>
     public DeviceNames DeviceNames { get; }

@@ -13,8 +13,16 @@ public sealed record DiscoveryResponse(
 
 public sealed record HostEndpoint(string Host, int Port, string Kind, int Preference);
 
-/// <summary>Every address the PC answers on; <see cref="Wake"/> is how a phone on its network can wake it.</summary>
-public sealed record HostEndpointsPayload(string HostId, IReadOnlyList<HostEndpoint> Endpoints, IReadOnlyList<WakeTarget>? Wake = null);
+/// <summary>
+/// Every address the PC answers on. <see cref="Wake"/> is how a phone on its network can wake it.
+/// Away from home a phone asks one of the <see cref="WakeRelays"/>, a device at home, to do it,
+/// signing the request with <see cref="WakeKey"/> (base64), which only paired devices are given.
+/// </summary>
+public sealed record HostEndpointsPayload(string HostId, IReadOnlyList<HostEndpoint> Endpoints, IReadOnlyList<WakeTarget>? Wake = null,
+    string? WakeKey = null, IReadOnlyList<WakeRelay>? WakeRelays = null);
+
+/// <summary>A paired device that wakes the PC when asked: its name, and the addresses it takes requests on.</summary>
+public sealed record WakeRelay(string DeviceId, string Name, IReadOnlyList<string> Addresses);
 
 /// <summary>A network card's address (<c>AA:BB:CC:DD:EE:FF</c>) and its network's broadcast address, for Wake-on-LAN.</summary>
 public sealed record WakeTarget(string Mac, string Broadcast);
@@ -61,9 +69,10 @@ public sealed record HeartbeatPayload(DateTimeOffset SentAt);
 /// its natural (portrait) orientation; window streams are encoded to fit it exactly.
 /// <see cref="AudioCodecs"/> is the compressed audio it can play (<c>opus</c>); PCM always works.
 /// <see cref="BatteryLevel"/> (percent) and <see cref="Charging"/> are resent whenever they change.
+/// <see cref="WakeRelay"/> is where it takes requests to wake the PC, when it offers to; null when it doesn't.
 /// </summary>
 public sealed record DeviceInfoPayload(string DisplayName, string Model, int? BatteryLevel = null, int? ScreenWidth = null, int? ScreenHeight = null,
-    IReadOnlyList<string>? AudioCodecs = null, bool? Charging = null);
+    IReadOnlyList<string>? AudioCodecs = null, bool? Charging = null, IReadOnlyList<string>? WakeRelay = null);
 
 /// <summary>Ring for up to <see cref="Seconds"/>, loud even on silent, until stopped on the phone.</summary>
 public sealed record RingPayload(int Seconds = 30);

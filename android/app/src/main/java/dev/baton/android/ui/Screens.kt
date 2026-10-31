@@ -578,17 +578,27 @@ private fun HomeScreen(grants: Grants, onSettings: (() -> Unit)?) {
                     }
                     Spacer(Modifier.height(Tokens.Space2))
                     StatusPill(status, pc?.name)
-                    // Asleep or off: a phone on the same network can wake it.
+                    // Asleep or off: a phone on the same network wakes it, and away from home a device there does.
                     if (status.phase == LinkPhase.Offline && remember { dev.baton.android.link.WakeOnLan.canWake(context) }) {
                         var waking by remember { mutableStateOf(false) }
+                        var outcome by remember { mutableStateOf<String?>(null) }
                         TextButton(enabled = !waking, onClick = {
                             waking = true
+                            outcome = null
                             scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                                 dev.baton.android.link.WakeOnLan.wake(context)
+                                val relays = dev.baton.android.link.WakeRelay.relays(context, Link.deviceId)
+                                val relayed = dev.baton.android.link.WakeRelay.ask(context, Link.deviceId)
+                                outcome = when {
+                                    relayed != null -> "$relayed sent the wake signal."
+                                    relays.isNotEmpty() -> "No device at home answered. At home, this phone wakes it itself."
+                                    else -> null
+                                }
                                 delay(10_000)
                                 waking = false
                             }
                         }) { Text(if (waking) "Waking your PC…" else "Wake your PC") }
+                        outcome?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                 }
 
@@ -870,6 +880,7 @@ fun SettingsScreen(trust: TrustStore, grants: Grants, onBack: (() -> Unit)?) {
             }
             SettingsPage.Diagnostics -> item { LinkDiagnosticsSetting() }
             SettingsPage.About -> {
+              item { WakeRelaySetting() }
               item {
                 Card(shape = RoundedCornerShape(Tokens.CardRadius),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {

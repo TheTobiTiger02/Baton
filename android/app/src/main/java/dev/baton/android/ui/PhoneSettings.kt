@@ -352,6 +352,39 @@ private fun ModeOption(selected: Boolean, title: String, description: String, on
     }
 }
 
+/**
+ * "Wake your PC from away": this device, staying at home, wakes the PC when another one asks
+ * over Tailscale. Only devices paired with the PC can ask.
+ */
+@Composable
+fun WakeRelaySetting() {
+    val context = LocalContext.current
+    var enabled by remember { mutableStateOf(BatonSettings.wakeRelay(context)) }
+    val tailscale = remember { dev.baton.android.link.WakeRelay.hasTailscale() }
+
+    fun set(value: Boolean) {
+        enabled = value
+        BatonSettings.setWakeRelay(context, value)
+        dev.baton.android.link.LinkService.wakeRelayChanged(context)
+    }
+
+    SettingsCardColumn {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { set(!enabled) }) {
+            Column(Modifier.weight(1f)) {
+                Text("Wake your PC for your other devices", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "For a device that stays at home, like a tablet. When your PC sleeps and your phone is away, " +
+                        "\"Wake your PC\" on the phone asks this device, over Tailscale, to wake it. Only devices paired with your PC can ask. " +
+                        if (tailscale) "" else "Tailscale isn't running on this device: turn it on so your phone can reach it from away.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.width(Tokens.Space3))
+            Switch(checked = enabled, onCheckedChange = ::set)
+        }
+    }
+}
+
 /** The link log: why the connection dropped, with a report to copy or share. */
 @Composable
 fun LinkDiagnosticsSetting() {

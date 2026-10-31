@@ -18,7 +18,8 @@ namespace Baton.Host;
 public sealed class EndpointEnumerator(
     WebSocketSessionHub sessions,
     HostIdentity identity,
-    DiagnosticsLog diagnostics) : BackgroundService
+    DiagnosticsLog diagnostics,
+    Func<IReadOnlyList<WakeRelay>> wakeRelays) : BackgroundService
 {
     public const string KindLan = "lan";
     public const string KindTailscale = "tailscale";
@@ -44,7 +45,7 @@ public sealed class EndpointEnumerator(
     public Envelope CreateEnvelope() => Envelope.Create(
         MessageTypes.HostEndpoints,
         identity.HostId,
-        new HostEndpointsPayload(identity.HostId, Current, WakeTargets()));
+        new HostEndpointsPayload(identity.HostId, Current, WakeTargets(), Convert.ToBase64String(identity.WakeKey), wakeRelays()));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -96,6 +97,12 @@ public sealed class EndpointEnumerator(
             "host.endpoints.changed",
             string.Join(", ", next.Select(endpoint => $"{endpoint.Kind}:{endpoint.Host}")));
 
+        await AnnounceAsync(cancellationToken);
+    }
+
+    /// <summary>Sends the addresses, and how to wake this PC, to every connected phone.</summary>
+    public async Task AnnounceAsync(CancellationToken cancellationToken = default)
+    {
         var envelope = CreateEnvelope();
         foreach (var status in sessions.GetStatuses())
         {

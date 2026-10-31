@@ -21,8 +21,10 @@ public sealed class HostIdentity : IDisposable
         string hostId,
         DateTimeOffset createdAt,
         X509Certificate2 certificate,
-        string storageDirectory)
+        string storageDirectory,
+        byte[] wakeKey)
     {
+        WakeKey = wakeKey;
         HostId = hostId;
         CreatedAt = createdAt;
         Certificate = certificate;
@@ -36,6 +38,9 @@ public sealed class HostIdentity : IDisposable
     public X509Certificate2 Certificate { get; }
     public string CertificateFingerprint { get; }
     public string StorageDirectory { get; }
+
+    /// <summary>Signs requests to wake this PC; only paired devices are given it.</summary>
+    public byte[] WakeKey { get; }
 
     public static string DefaultStorageDirectory { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -93,7 +98,9 @@ public sealed class HostIdentity : IDisposable
         AtomicWrite(certificateBackupPath, certificateBytes);
         AtomicWrite(certificatePath, certificateBytes);
 
-        return new HostIdentity(identity.HostId, identity.CreatedAt, certificate, directory);
+        // Derived, so it needs no storage of its own and stays the same as long as the identity does.
+        var wakeKey = HMACSHA256.HashData(System.Text.Encoding.UTF8.GetBytes(certificatePassword), "baton-wake-v1"u8);
+        return new HostIdentity(identity.HostId, identity.CreatedAt, certificate, directory, wakeKey);
     }
 
     public void Dispose() => Certificate.Dispose();
