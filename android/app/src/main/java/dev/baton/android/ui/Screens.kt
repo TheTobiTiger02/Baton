@@ -48,6 +48,7 @@ import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Contacts
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Mouse
 import androidx.compose.material.icons.rounded.Notifications
@@ -123,7 +124,9 @@ data class Grants(
     val battery: Boolean,
     val microphone: Boolean = false,
     /** Android blocks accessibility and media access for this install until it is allowed in App info. */
-    val restricted: Boolean = false
+    val restricted: Boolean = false,
+    /** Optional: turns a chat's name into its number, to open the same chat on the PC. */
+    val contacts: Boolean = false
 ) {
     val essentialsDone: Boolean get() = notifications && media
 
@@ -134,7 +137,8 @@ data class Grants(
             accessibility = BatonAccessibilityService.isGranted(context),
             battery = BatteryOptimizationPrompt.isExempt(context),
             microphone = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
-            restricted = restrictedSettings(context)
+            restricted = restrictedSettings(context),
+            contacts = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
         )
 
         /**
@@ -281,6 +285,7 @@ private fun PermissionSteps(grants: Grants, onlyMissing: Boolean = false) {
     val context = LocalContext.current
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val contactsPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space3)) {
         if (grants.restricted && (!grants.media || !grants.accessibility)) RestrictedSettingsHint()
         if (!onlyMissing || !grants.notifications) PermissionCard(Icons.Rounded.Notifications, "Notifications",
@@ -309,6 +314,12 @@ private fun PermissionSteps(grants: Grants, onlyMissing: Boolean = false) {
             "When your PC shows this phone, its sound plays there too. Android calls this the microphone; " +
                 "Baton only takes what apps play, never what the microphone hears.", grants.microphone, "Allow") {
             microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+        // Optional, so never part of "Finish setting up".
+        if (!onlyMissing) PermissionCard(Icons.Rounded.Contacts, "Chats on your PC",
+            "Optional. Opens the WhatsApp chat you have open here in WhatsApp on your PC. Baton looks up the chat's name " +
+                "in your contacts to find the number; nothing else is read, and nothing leaves your devices.", grants.contacts, "Allow") {
+            contactsPermission.launch(Manifest.permission.READ_CONTACTS)
         }
     }
 }

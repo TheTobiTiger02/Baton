@@ -177,11 +177,13 @@ public sealed class AppDirectory
                     return HandoffStatus.Opened;
                 }
 
-                // An app that takes links of its own kind (tg:, spotify:) gets the link itself.
+                // An app that takes links of its own kind (tg:, spotify:) gets the link itself, and a
+                // web link to a chat (wa.me) becomes one.
                 var known = Media.KnownApps.CounterpartOf(Platforms.Windows, id);
-                if (url is not null && known?.UriScheme is { } scheme && url.StartsWith(scheme + ":", StringComparison.OrdinalIgnoreCase))
+                if (url is not null && known?.UriScheme is { } scheme
+                    && (url.StartsWith(scheme + ":", StringComparison.OrdinalIgnoreCase) ? url : Media.ContentLinks.ForApp(scheme, url)) is { } appLink)
                 {
-                    Shell(url);
+                    Shell(appLink);
                     return HandoffStatus.Opened;
                 }
 

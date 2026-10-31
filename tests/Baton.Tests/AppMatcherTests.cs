@@ -30,6 +30,26 @@ public class AppMatcherTests
         AppMatcher.Options(activity, from, to, apps, stream).ToArray();
 
     [Fact]
+    public void ChatsAndPlacesFromThePhoneOpenWhereTheyBelong()
+    {
+        // A WhatsApp chat read on the phone: WhatsApp on the PC first, given the chat itself.
+        var chat = new Activity("page:com.whatsapp", "phone", ActivityKind.WebPage, "Chat with Anna", new ActivityApp("WhatsApp", "com.whatsapp"),
+            DateTimeOffset.UtcNow, Url: "https://wa.me/4915123456789?text=bis%20gleich");
+        var options = Options(chat, Platforms.Android, Platforms.Windows, Pc);
+        Assert.Equal((ChoiceKinds.App, "WhatsApp"), (options[0].Kind, options[0].Label));
+        Assert.Equal("whatsapp://send?phone=4915123456789&text=bis%20gleich", Baton.Host.Media.ContentLinks.ForApp("whatsapp", chat.Url!));
+        Assert.Equal("tg://resolve?domain=durov", Baton.Host.Media.ContentLinks.ForApp("tg", "https://t.me/durov"));
+        Assert.Null(Baton.Host.Media.ContentLinks.ForApp("whatsapp", "https://wa.me/notanumber"));
+        Assert.Null(Baton.Host.Media.ContentLinks.ForApp("tg", "https://wa.me/4915123456789"));
+
+        // A place in Google Maps: there is no Maps app on the PC, so the browser.
+        var place = new Activity("page:com.google.android.apps.maps", "phone", ActivityKind.WebPage, "Brandenburg Gate",
+            new ActivityApp("Maps", "com.google.android.apps.maps"), DateTimeOffset.UtcNow,
+            Url: "https://www.google.com/maps/search/?api=1&query=Brandenburg%20Gate");
+        Assert.Equal(ChoiceKinds.Default, Options(place, Platforms.Android, Platforms.Windows, Pc)[0].Kind);
+    }
+
+    [Fact]
     public void TwitchTabsOpenInTheTwitchAppAndStremioInStremio()
     {
         var twitch = new Activity("tab:1", "pc", ActivityKind.WebMedia, "Stream", new ActivityApp("Zen", "zen"), DateTimeOffset.UtcNow,
