@@ -63,4 +63,7 @@ public static class MessageTypes
 
     /// <summary>The PC noticed a phone come near it or go away, from the phone's Bluetooth signal.</summary>
     public const string Proximity = "proximity";
+
+    /// <summary>A phone started walking (its step sensor), for the PC to tell leaving from sitting.</summary>
+    public const string DeviceMotion = "device.motion";
 }

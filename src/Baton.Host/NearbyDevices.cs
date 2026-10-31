@@ -47,6 +47,12 @@ public sealed class NearbyDevices : IDisposable
     /// </summary>
     public static readonly TimeSpan FadedAfter = TimeSpan.FromSeconds(8);
 
+    /// <summary>
+    /// A phone near the PC that starts walking while nobody has touched the PC for this long is
+    /// leaving it, right away: the signal can't tell, as the first steps read the same as the desk.
+    /// </summary>
+    public static readonly TimeSpan UntouchedFor = TimeSpan.FromSeconds(3);
+
     /// <summary>What Windows reports when it has no strength for a packet: not a reading.</summary>
     private const short NoReading = -127;
 
@@ -57,10 +63,14 @@ public sealed class NearbyDevices : IDisposable
     private readonly Timer _timer;
     private BluetoothLEAdvertisementWatcher? _watcher;
 
-    public NearbyDevices(DeviceRegistry devices, DiagnosticsLog diagnostics)
+    private readonly Func<TimeSpan> _inputIdle;
+
+    /// <param name="inputIdle">How long since the PC's keyboard or mouse was used.</param>
+    public NearbyDevices(DeviceRegistry devices, DiagnosticsLog diagnostics, Func<TimeSpan>? inputIdle = null)
     {
         _devices = devices;
         _diagnostics = diagnostics;
+        _inputIdle = inputIdle ?? (() => TimeSpan.MaxValue);
         _timer = new Timer(_ => Evaluate(DateTimeOffset.UtcNow), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
     }
 
@@ -140,6 +150,33 @@ public sealed class NearbyDevices : IDisposable
         Evaluate(now);
     }
 
+    /// <summary>
+    /// The phone started walking. Near the PC, with nobody at its keyboard or mouse, that is
+    /// leaving: away now, and back only once the signal has dropped and returned, or the PC is
+    /// used again (the signal still reads as the desk for the first steps).
+    /// </summary>
+    public void Walking(string deviceId, DateTimeOffset now)
+    {
+        if (!_signals.TryGetValue(deviceId, out var signal) || _inputIdle() < UntouchedFor)
+        {
+            return;
+        }
+
+        lock (signal)
+        {
+            if (signal.Near != true)
+            {
+                return;
+            }
+
+            signal.Near = false;
+            signal.LeftAt = now;
+        }
+
+        _diagnostics.Record(DiagnosticsCategory.Handoff, "nearby.away", "walking off", deviceId);
+        Changed?.Invoke(deviceId, false);
+    }
+
     /// <summary>Applies the thresholds; also called regularly, to notice a phone that fell silent.</summary>
     public void Evaluate(DateTimeOffset now)
     {
@@ -152,12 +189,19 @@ public sealed class NearbyDevices : IDisposable
                 strength = signal.Strength ?? double.NegativeInfinity;
                 var gone = now - signal.HeardAt > (strength < NearRssi ? FadedAfter : GoneAfter);
                 var leaving = signal.WeakSince is { } weak && now - weak >= LeavingFor;
+                // Walked off: the strong signal of the first steps doesn't mean back. Out of range or
+                // weak, or the PC used since, and the signal decides again.
+                if (signal.LeftAt is { } left && (gone || strength <= LeavingRssi || _inputIdle() < now - left))
+                {
+                    signal.LeftAt = null;
+                }
+
                 next = signal.Near switch
                 {
                     // The first reading sets where a phone is: being near when Baton starts isn't arriving.
                     null => !gone && strength >= NearRssi,
                     true when gone || leaving => false,
-                    false when !gone && strength >= NearRssi => true,
+                    false when !gone && strength >= NearRssi && signal.LeftAt is null => true,
                     _ => signal.Near
                 };
                 if (next == signal.Near)
@@ -196,5 +240,8 @@ public sealed class NearbyDevices : IDisposable
 
         /// <summary>Since when the smoothed signal has been at or below <see cref="LeavingRssi"/>.</summary>
         public DateTimeOffset? WeakSince;
+
+        /// <summary>When it walked off; the signal can't say it's back until this clears.</summary>
+        public DateTimeOffset? LeftAt;
     }
 }

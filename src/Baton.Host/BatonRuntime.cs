@@ -49,7 +49,16 @@ public sealed class BatonRuntime : IAsyncDisposable
             CaptureBrowserReturnTarget = Browser.CaptureReturnTarget
         };
         Presence.Changed += Coordinator.SetLocalPresence;
-        Nearby = new NearbyDevices(Host.Devices, Host.Diagnostics);
+        Nearby = new NearbyDevices(Host.Devices, Host.Diagnostics, PresenceMonitor.IdleTime);
+        Host.MessageReceived += (deviceId, envelope) =>
+        {
+            if (envelope.Type == MessageTypes.DeviceMotion && envelope.Read<MotionPayload>() is { Walking: true })
+            {
+                Nearby.Walking(deviceId, DateTimeOffset.UtcNow);
+            }
+
+            return Task.CompletedTask;
+        };
         // A phone changing Wi-Fi as it walks off reconnects: what it missed meanwhile is sent again.
         Host.DeviceConnectionChanged += (deviceId, connected) =>
         {

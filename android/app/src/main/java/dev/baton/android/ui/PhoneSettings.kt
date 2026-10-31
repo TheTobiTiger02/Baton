@@ -98,28 +98,40 @@ fun NearbySetting() {
         dev.baton.android.link.LinkService.settingsChanged(context)
     }
 
-    val permission = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted -> if (granted) apply(true) }
+    // Bluetooth is what it needs; the step sensor ("Physical activity") makes walking off noticed at once.
+    val permissions = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) {
+        if (dev.baton.android.link.NearbyBeacon.hasPermission(context)) apply(true)
+    }
 
     fun set(value: Boolean) {
-        if (value && !dev.baton.android.link.NearbyBeacon.hasPermission(context) && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            permission.launch(android.Manifest.permission.BLUETOOTH_ADVERTISE)
-        } else {
-            apply(value)
+        val missing = buildList {
+            if (!dev.baton.android.link.NearbyBeacon.hasPermission(context) && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                add(android.Manifest.permission.BLUETOOTH_ADVERTISE)
+            }
+            if (!dev.baton.android.link.StepWatch.hasPermission(context)) add(android.Manifest.permission.ACTIVITY_RECOGNITION)
         }
+        if (value && missing.isNotEmpty()) permissions.launch(missing.toTypedArray()) else apply(value)
     }
 
     SettingsCardColumn {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { set(!enabled) }) {
             Column(Modifier.weight(1f)) {
                 Text("Notice when I'm at my PC", style = MaterialTheme.typography.titleMedium)
-                Text("A quiet Bluetooth signal tells your PC when this phone comes near or goes away. Walk off and this phone " +
-                    "offers what the PC was showing; sit down and the PC offers what this phone was doing. It only suggests, " +
-                    "and the signal changes every 15 minutes, so only your PC recognises it.",
+                Text("A quiet Bluetooth signal tells your PC when this phone comes near or goes away, and the step counter " +
+                    "notices you walking off. Walk away and this phone offers what the PC was showing; sit down and the PC " +
+                    "offers what this phone was doing. It only suggests, and the signal changes every 15 minutes, so only " +
+                    "your PC recognises it.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.width(Tokens.Space3))
             Switch(checked = enabled, onCheckedChange = ::set)
+        }
+        // On from before the step counter was part of it: ask for it, it's what makes the offer prompt.
+        if (enabled && !dev.baton.android.link.StepWatch.hasPermission(context)) {
+            TextButton(onClick = { permissions.launch(arrayOf(android.Manifest.permission.ACTIVITY_RECOGNITION)) }) {
+                Text("Allow the step counter, to notice you walking off at once")
+            }
         }
     }
 }

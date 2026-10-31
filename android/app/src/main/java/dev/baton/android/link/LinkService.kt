@@ -207,6 +207,7 @@ class LinkService : Service() {
         PcRemote.stop()
         WakeRelay.stop()
         NearbyBeacon.stop()
+        StepWatch.stop()
         releaseLocks()
         scope.cancel()
         Link.setStatus(LinkStatus(if (trust.isPaired) LinkPhase.Offline else LinkPhase.Unpaired, "Stopped"))
@@ -493,7 +494,13 @@ class LinkService : Service() {
     private fun applyDeviceRoles() {
         if (BatonSettings.wakeRelay(this)) WakeRelay.start(this) else WakeRelay.stop()
         val host = trust.host
-        if (host != null && BatonSettings.nearby(this)) NearbyBeacon.start(this, host.trustKey) else NearbyBeacon.stop()
+        if (host != null && BatonSettings.nearby(this)) {
+            NearbyBeacon.start(this, host.trustKey)
+            StepWatch.start(this)
+        } else {
+            NearbyBeacon.stop()
+            StepWatch.stop()
+        }
     }
 
     private fun forgetLocally() {

@@ -47,7 +47,8 @@ public sealed class PresenceMonitor : IDisposable
         }
     }
 
-    private static TimeSpan IdleTime()
+    /// <summary>How long since the keyboard or mouse was last used.</summary>
+    public static TimeSpan IdleTime()
     {
         var info = new LastInputInfo { Size = (uint)Marshal.SizeOf<LastInputInfo>() };
         return GetLastInputInfo(ref info)

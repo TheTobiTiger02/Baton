@@ -86,6 +86,7 @@ object MessageTypes {
     const val TIMELINE = "timeline"
     const val TIMELINE_CLEAR = "timeline.clear"
     const val PROXIMITY = "proximity"
+    const val DEVICE_MOTION = "device.motion"
 }
 
 object HandoffModes {
@@ -588,3 +589,7 @@ data class TimelinePayload(val entries: List<TimelineEntry>)
 /** The PC noticed this phone come near it, or move away (from its Bluetooth signal, [dev.baton.android.link.NearbyBeacon]). */
 @Serializable
 data class ProximityPayload(val near: Boolean)
+
+/** This phone started walking (a few steps in a row), for the PC to tell leaving from sitting. */
+@Serializable
+data class MotionPayload(val walking: Boolean)

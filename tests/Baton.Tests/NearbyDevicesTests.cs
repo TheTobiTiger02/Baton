@@ -14,6 +14,45 @@ public class NearbyDevicesTests
     }
 
     [Fact]
+    public void WalkingOffWhileNobodyUsesThePcIsLeavingAtOnce()
+    {
+        var idle = TimeSpan.FromMinutes(1);
+        using var nearby = new NearbyDevices(new DeviceRegistry(null), new DiagnosticsLog(), () => idle);
+        var changes = new List<bool>();
+        nearby.Changed += (_, near) => changes.Add(near);
+        var now = DateTimeOffset.UtcNow;
+        for (var second = 0; second < 6; second++) nearby.Observe("phone", -66, now.AddSeconds(second));
+
+        // Typing at the PC while the phone counts steps (pacing, a colleague's phone in a pocket): still here.
+        idle = TimeSpan.FromSeconds(1);
+        nearby.Walking("phone", now.AddSeconds(6));
+        Assert.Empty(changes);
+
+        // Up from the desk: away at once, though the first steps still read as the desk.
+        idle = TimeSpan.FromSeconds(10);
+        nearby.Walking("phone", now.AddSeconds(8));
+        Assert.Equal([false], changes);
+        nearby.Observe("phone", -68, now.AddSeconds(9));
+        nearby.Observe("phone", -66, now.AddSeconds(10));
+        Assert.Equal([false], changes);
+
+        // Out of range and back: near again.
+        nearby.Evaluate(now.AddSeconds(40));
+        idle = TimeSpan.FromSeconds(60);
+        for (var second = 60; second < 70; second++) nearby.Observe("phone", -66, now.AddSeconds(second));
+        Assert.Equal([false, true], changes);
+
+        // Walked off but stayed in the room, then sat down and used the PC again: near again.
+        idle = TimeSpan.FromSeconds(10);
+        nearby.Walking("phone", now.AddSeconds(70));
+        nearby.Observe("phone", -66, now.AddSeconds(75));
+        Assert.Equal([false, true, false], changes);
+        idle = TimeSpan.FromSeconds(1);
+        nearby.Observe("phone", -66, now.AddSeconds(90));
+        Assert.Equal([false, true, false, true], changes);
+    }
+
+    [Fact]
     public void TheDesksDipsAreNotLeaving()
     {
         using var nearby = new NearbyDevices(new DeviceRegistry(null), new DiagnosticsLog());
