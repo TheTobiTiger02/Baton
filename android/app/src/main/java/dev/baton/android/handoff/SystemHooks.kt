@@ -78,6 +78,7 @@ class BatonAccessibilityService : AccessibilityService() {
             BrowserPages.onForeground(rootInActiveWindow?.packageName?.toString() ?: packageName)
         }
 
+        if (packageName in AppPages.packages) return readAppPage(packageName)
         val urlBarId = KnownApps.urlBarIds[packageName] ?: return
         val root = rootInActiveWindow ?: return
         val bar = root.findAccessibilityNodeInfosByViewId(urlBarId).firstOrNull() ?: return
@@ -87,11 +88,31 @@ class BatonAccessibilityService : AccessibilityService() {
         BrowserPages.onPage(packageName, url, pageTitle(root))
     }
 
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var appPageQueued = false
+
+    /**
+     * Reads what Maps or WhatsApp shows, once things settle: their screens change many times a
+     * second (a moving map), and once per [APP_PAGE_DELAY_MS] is plenty to know the place or chat.
+     */
+    private fun readAppPage(packageName: String) {
+        if (appPageQueued) return
+        appPageQueued = true
+        handler.postDelayed({
+            appPageQueued = false
+            val root = rootInActiveWindow ?: return@postDelayed
+            if (root.packageName?.toString() != packageName) return@postDelayed
+            AppPages.read(this, packageName, root)?.let { BrowserPages.onPage(packageName, it.url, it.title, it.content) }
+        }, APP_PAGE_DELAY_MS)
+    }
+
     /** Chrome and its relatives expose the page title on the toolbar's content description. */
     private fun pageTitle(root: AccessibilityNodeInfo): String? =
         root.findAccessibilityNodeInfosByViewId("com.android.chrome:id/title").firstOrNull()?.text?.toString()
 
     companion object {
+        private const val APP_PAGE_DELAY_MS = 700L
+
         @Volatile
         var instance: BatonAccessibilityService? = null
             private set(value) {

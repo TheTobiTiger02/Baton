@@ -173,13 +173,17 @@ public static class DesktopWindows
 
     public static bool Exists(IntPtr handle) => IsWindow(handle);
 
-    /// <summary>The first offerable top-level window whose title contains <paramref name="text"/>.</summary>
-    public static WindowInfo? FindByTitle(string text)
+    /// <summary>
+    /// The first offerable top-level window whose title contains <paramref name="text"/>, of a
+    /// process whose name starts with <paramref name="processPrefix"/> when one is given.
+    /// </summary>
+    public static WindowInfo? FindByTitle(string text, string? processPrefix = null)
     {
         WindowInfo? found = null;
         EnumWindows((handle, _) =>
         {
-            if (Describe(handle) is { } window && window.Title.Contains(text, StringComparison.OrdinalIgnoreCase))
+            if (Describe(handle) is { } window && window.Title.Contains(text, StringComparison.OrdinalIgnoreCase)
+                && (processPrefix is null || window.ProcessName.StartsWith(processPrefix, StringComparison.OrdinalIgnoreCase)))
             {
                 found = window;
                 return false;

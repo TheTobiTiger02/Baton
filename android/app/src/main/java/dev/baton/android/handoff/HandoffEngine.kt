@@ -10,7 +10,10 @@ import android.os.SystemClock
 import android.util.Log
 import dev.baton.android.BatonSettings
 import dev.baton.android.link.HandoffNotice
+import dev.baton.android.link.LinkDiagnostics
 import dev.baton.android.link.Link
+import dev.baton.android.protocol.TimelinePayload
+import dev.baton.android.protocol.TimelineEntry
 import dev.baton.android.protocol.Activity
 import dev.baton.android.protocol.ActivityKind
 import dev.baton.android.protocol.ActivityListPayload
@@ -66,6 +69,34 @@ object HandoffEngine {
     private val publish = Runnable { publishNow() }
 
     val history = HandoffHistory()
+    private val timelineFlow = MutableStateFlow<List<TimelineEntry>>(emptyList())
+
+    /** The recent handoffs of every device, as the PC keeps them (newest first). */
+    val timeline: StateFlow<List<TimelineEntry>> = timelineFlow.asStateFlow()
+
+    fun onTimeline(payload: TimelinePayload) {
+        timelineFlow.value = payload.entries
+    }
+
+    /** A past handoff that can open here again from what it carried: a link, or content such as a video. */
+    fun canReopen(entry: TimelineEntry): Boolean = entry.activity?.let { it.url != null || it.content != null } == true
+
+    /** Opens a past handoff's activity here again, where it was left (not where it would be had it kept playing). */
+    fun reopen(entry: TimelineEntry) {
+        val context = appContext ?: return
+        val activity = entry.activity?.let { it.copy(playback = it.playback?.copy(playing = false)) } ?: return
+        scope.launch {
+            val result = runCatching { Openers.open(context, activity, null as HandoffChoice?) }.getOrNull()
+            if (result?.status == HandoffStatus.Failed) Link.notice(HandoffNotice(Wire.newId(), activity.title, result.detail ?: "Couldn't open it.", true, true))
+        }
+    }
+
+    /** Clears the timeline everywhere: this device's own list and the PC's, which tells the others. */
+    fun clearTimeline() {
+        history.clear()
+        timelineFlow.value = emptyList()
+        Link.send(MessageTypes.TIMELINE_CLEAR, kotlinx.serialization.json.JsonObject(emptyMap()))
+    }
     private val continuations = MediaContinuations()
     private var expiry: kotlinx.coroutines.Job? = null
     private fun begin(id: String, activity: Activity?, source: String, target: String, mode: String, choice: HandoffChoice?,
@@ -149,12 +180,48 @@ object HandoffEngine {
         if (suggestions.tryOffer(pc.deviceId, activity)) BatonNotifications.suggestion(context, pc, activity)
     }
 
+    private const val LEAVING_OFFER_MS = 10 * 60_000L
+
+    /** Offered because this phone left the PC: the PC still counts as in use for a while after. */
+    @Volatile private var offeredOnLeaving = false
+    @Volatile private var leavingOffer: Pair<String, Activity>? = null
+
+    /**
+     * The PC noticed this phone move away (it was carried off, so offer what the PC showed here)
+     * or come back (that offer is stale). Only ever an offer, as on unlock.
+     */
+    fun onProximity(context: Context, near: Boolean) {
+        LinkDiagnostics.record(if (near) "nearby.near" else "nearby.away")
+        if (near) {
+            if (offeredOnLeaving) BatonNotifications.cancelSuggestion(context)
+            offeredOnLeaving = false
+            // Back before taking it up: walking off again offers it again.
+            leavingOffer?.let { (pcId, activity) -> suggestions.forget(pcId, activity) }
+            leavingOffer = null
+            return
+        }
+        if (!BatonSettings.suggestFromPc(context)) return
+        val pc = Link.peers.value.firstOrNull { it.kind == "pc" } ?: return
+        // Just left: what the PC showed a moment ago counts, though it may still be "in use".
+        val activity = Suggestions.pick(pc.activities, PresenceState.Idle) ?: return
+        if (suggestions.tryOffer(pc.deviceId, activity)) {
+            // Marked first: the device list can update while the offer goes up, and the PC still
+            // counts as in use, which would read as being back at it and withdraw the offer at once.
+            offeredOnLeaving = true
+            leavingOffer = pc.deviceId to activity
+            // Walking off, the phone is likely in a pocket: it waits until looked at, or until back at the PC.
+            BatonNotifications.suggestion(context, pc, activity, lastsMs = LEAVING_OFFER_MS)
+        }
+    }
+
     /** The offer is stale once the user is back at the PC or the activity is gone there. */
     private fun withdrawStaleSuggestion(context: Context, peers: List<dev.baton.android.protocol.PeerInfo>) {
         val offered = BatonNotifications.suggested ?: return
         val pc = peers.firstOrNull { it.deviceId == offered.first }
-        if (pc == null || pc.presence == PresenceState.Active || pc.activities.none { it.id == offered.second }) {
+        val backAtPc = pc?.presence == PresenceState.Active && !offeredOnLeaving
+        if (pc == null || backAtPc || pc.activities.none { it.id == offered.second }) {
             BatonNotifications.cancelSuggestion(context)
+            offeredOnLeaving = false
         }
     }
 

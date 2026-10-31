@@ -48,6 +48,7 @@ import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Contacts
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Mouse
 import androidx.compose.material.icons.rounded.Notifications
@@ -123,7 +124,9 @@ data class Grants(
     val battery: Boolean,
     val microphone: Boolean = false,
     /** Android blocks accessibility and media access for this install until it is allowed in App info. */
-    val restricted: Boolean = false
+    val restricted: Boolean = false,
+    /** Optional: turns a chat's name into its number, to open the same chat on the PC. */
+    val contacts: Boolean = false
 ) {
     val essentialsDone: Boolean get() = notifications && media
 
@@ -134,7 +137,8 @@ data class Grants(
             accessibility = BatonAccessibilityService.isGranted(context),
             battery = BatteryOptimizationPrompt.isExempt(context),
             microphone = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
-            restricted = restrictedSettings(context)
+            restricted = restrictedSettings(context),
+            contacts = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
         )
 
         /**
@@ -281,6 +285,7 @@ private fun PermissionSteps(grants: Grants, onlyMissing: Boolean = false) {
     val context = LocalContext.current
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val contactsPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space3)) {
         if (grants.restricted && (!grants.media || !grants.accessibility)) RestrictedSettingsHint()
         if (!onlyMissing || !grants.notifications) PermissionCard(Icons.Rounded.Notifications, "Notifications",
@@ -309,6 +314,12 @@ private fun PermissionSteps(grants: Grants, onlyMissing: Boolean = false) {
             "When your PC shows this phone, its sound plays there too. Android calls this the microphone; " +
                 "Baton only takes what apps play, never what the microphone hears.", grants.microphone, "Allow") {
             microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+        // Optional, so never part of "Finish setting up".
+        if (!onlyMissing) PermissionCard(Icons.Rounded.Contacts, "Chats on your PC",
+            "Optional. Opens the WhatsApp chat you have open here in WhatsApp on your PC. Baton looks up the chat's name " +
+                "in your contacts to find the number; nothing else is read, and nothing leaves your devices.", grants.contacts, "Allow") {
+            contactsPermission.launch(Manifest.permission.READ_CONTACTS)
         }
     }
 }
@@ -757,6 +768,9 @@ private fun NoticeBanner(notice: HandoffNotice) {
 @Composable
 private fun RecentHandoffs() {
     val records by HandoffEngine.history.recent.collectAsStateWithLifecycle()
+    val timeline by HandoffEngine.timeline.collectAsStateWithLifecycle()
+    // This phone's own handoffs come with live state and retry; the rest of the shared timeline follows.
+    val earlier = remember(records, timeline) { timeline.filter { entry -> records.none { it.requestId == entry.requestId } } }
     val peers by Link.peers.collectAsStateWithLifecycle()
     val local by HandoffEngine.local.collectAsStateWithLifecycle()
     val status by Link.status.collectAsStateWithLifecycle()
@@ -765,11 +779,11 @@ private fun RecentHandoffs() {
     fun name(id: String) = if (id == Link.deviceId) "This phone" else peers.firstOrNull { it.deviceId == id }?.name ?: "Unavailable device"
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space2)) {
         TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
-            Text("Recent handoffs (${records.size}) · ${if (expanded) "Hide" else "Show"}")
+            Text("Recent handoffs (${records.size + earlier.size}) · ${if (expanded) "Hide" else "Show"}")
         }
         if (expanded) {
-            TextButton(onClick = { HandoffEngine.history.clear() }, modifier = Modifier.align(Alignment.End)) { Text("Clear history") }
-            if (records.isEmpty()) Text("No handoffs in this session.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = { HandoffEngine.clearTimeline() }, modifier = Modifier.align(Alignment.End)) { Text("Clear on all devices") }
+            if (records.isEmpty() && earlier.isEmpty()) Text("No handoffs yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             records.forEach { record ->
                 val availability = remember(record, peers, local, status) { HandoffEngine.recovery(record) }
                 val couldStream = record.intent.source == Link.deviceId || record.intent.activity?.window != null ||
@@ -795,6 +809,7 @@ private fun RecentHandoffs() {
                     }
                 }
             }
+            earlier.forEach { entry -> TimelineCard(entry, ::name) }
         }
     }
     confirm?.let { request ->
@@ -802,6 +817,30 @@ private fun RecentHandoffs() {
             text = { Text("The destination hasn't confirmed this transfer. The activity may already have opened. Try again?") },
             confirmButton = { TextButton(onClick = { confirm = null; HandoffEngine.recover(request.first, request.second) }) { Text("Try again") } },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } })
+    }
+}
+
+/** A handoff from the shared timeline: when, from where to where, how it ended, and "Open here" when it can. */
+@Composable
+private fun TimelineCard(entry: dev.baton.android.protocol.TimelineEntry, name: (String) -> String) {
+    val started = remember(entry.startedAt) {
+        java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(dev.baton.android.protocol.Wire.parseTime(entry.startedAt)))
+    }
+    val outcome = when {
+        entry.unconfirmed -> "No confirmation received"
+        entry.status == dev.baton.android.protocol.HandoffStatus.Opened -> "Opened on destination"
+        entry.status == dev.baton.android.protocol.HandoffStatus.Fallback -> "Fallback used"
+        entry.status == dev.baton.android.protocol.HandoffStatus.Failed -> "Couldn't continue"
+        else -> "In progress"
+    }
+    Card(shape = RoundedCornerShape(Tokens.CardRadius), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(Tokens.Space4), verticalArrangement = Arrangement.spacedBy(Tokens.Space2)) {
+            Text(entry.title, style = MaterialTheme.typography.titleMedium)
+            Text("$started · ${name(entry.sourceDeviceId)} → ${name(entry.targetDeviceId)}", style = MaterialTheme.typography.bodySmall)
+            Text(outcome)
+            entry.detail?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            if (HandoffEngine.canReopen(entry)) OutlinedButton(onClick = { HandoffEngine.reopen(entry) }) { Text("Open here") }
+        }
     }
 }
 
@@ -860,6 +899,7 @@ fun SettingsScreen(trust: TrustStore, grants: Grants, onBack: (() -> Unit)?) {
             }
             SettingsPage.Handoff -> {
                 item { SuggestionSetting() }
+                item { NearbySetting() }
                 item { NotificationsSetting() }
                 item { ClipboardSetting() }
             }

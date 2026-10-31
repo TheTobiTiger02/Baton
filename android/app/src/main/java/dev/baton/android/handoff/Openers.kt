@@ -89,6 +89,7 @@ object Openers {
             "spotify" -> openMusic(context, activity, KnownApps.fromProvider("spotify")!!, query, positionMs, content.id, pinned)
             "netflix", "disney", "prime" -> openVideoService(context, activity, KnownApps.fromProvider(content.provider)!!)
             "stremio" -> openStremio(context, activity, content.id)
+            AppPages.WHATSAPP_PROVIDER -> openChatByName(context, activity, content.query)
             else -> {
                 val intent = playFromSearch(query, activity.title, artist)
                 if (Launcher.start(context, intent, activity.title)) {
@@ -169,6 +170,14 @@ object Openers {
         val link = if (id != null) "stremio:///detail/$id" else "stremio:///search?search=" + Uri.encode(activity.title)
         if (!Launcher.start(context, Intent(Intent.ACTION_VIEW, Uri.parse(link)).setPackage(app.androidPackage), activity.title)) return launchResult(false)
         return OpenResult(HandoffStatus.Fallback, "Opened ${activity.title} in Stremio: it continues where your account says you stopped.")
+    }
+
+    /** A chat no link opens (a group): WhatsApp, where the user picks it; Android gives apps no way to open it. */
+    private fun openChatByName(context: Context, activity: Activity, name: String?): OpenResult {
+        val launch = context.packageManager.getLaunchIntentForPackage(AppPages.WHATSAPP)
+            ?: return OpenResult(HandoffStatus.Failed, "WhatsApp isn't installed on this phone.")
+        if (!Launcher.start(context, launch, activity.title)) return launchResult(false)
+        return OpenResult(HandoffStatus.Fallback, "Opened WhatsApp. Open ${name ?: "the chat"} there.", AppPages.WHATSAPP)
     }
 
     private fun openVideoService(context: Context, activity: Activity, app: KnownApp): OpenResult {

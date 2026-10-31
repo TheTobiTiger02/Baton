@@ -27,6 +27,13 @@ public static partial class AppMatcher
     {
         var options = new List<HandoffChoice>();
         var known = KnownApps.CounterpartOf(sourcePlatform, activity.App.Id, activity.Window?.ProcessName);
+
+        // A chat read from a messenger on the phone continues in that messenger, not a browser tab.
+        if (activity.Kind == ActivityKind.WebPage && known is { UriScheme: not null, IsBrowser: false } && targetPlatform == Platforms.Windows)
+        {
+            options.AddRange(SameApp(activity, known, sourcePlatform, targetPlatform, targetApps)
+                .Select(app => new HandoffChoice(ChoiceKinds.App, app.Name, app.Id)));
+        }
         var provider = activity.Content?.Provider;
         var hasContent = activity.Url is not null
             || (activity.Kind is ActivityKind.AppMedia or ActivityKind.WebMedia && provider is not null and not "unknown")

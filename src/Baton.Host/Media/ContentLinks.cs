@@ -76,6 +76,34 @@ public static partial class ContentLinks
     /// <summary>The Stremio page of a title (see <see cref="StremioResolver"/>): Stremio and Harbor both open it.</summary>
     public static string StremioDetail(string id) => $"stremio:///detail/{id}";
 
+    /// <summary>
+    /// A web link to a chat as the messenger's own app takes it: <c>wa.me/49151…?text=…</c> becomes
+    /// <c>whatsapp://send?phone=49151…&amp;text=…</c>, <c>t.me/name</c> becomes <c>tg://resolve?domain=name</c>.
+    /// Null for anything else, or another app's <paramref name="scheme"/>.
+    /// </summary>
+    public static string? ForApp(string scheme, string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+        {
+            return null;
+        }
+
+        var path = uri.AbsolutePath.Trim('/');
+        var text = System.Web.HttpUtility.ParseQueryString(uri.Query)["text"];
+        switch (scheme.ToLowerInvariant(), uri.Host.ToLowerInvariant())
+        {
+            case ("whatsapp", "wa.me") when path.Length is >= 7 and <= 15 && path.All(char.IsAsciiDigit):
+                return $"whatsapp://send?phone={path}" + (text is { Length: > 0 } ? "&text=" + Uri.EscapeDataString(text) : "");
+            case ("tg", "t.me") when TelegramName().IsMatch(path):
+                return $"tg://resolve?domain={path}";
+            default:
+                return null;
+        }
+    }
+
+    [GeneratedRegex("^[A-Za-z][A-Za-z0-9_]{3,31}$")]
+    private static partial Regex TelegramName();
+
     /// <summary>A Twitch channel's page, when the name is one (letters, digits, underscore).</summary>
     public static string? TwitchChannel(string? name) =>
         name is { Length: >= 3 and <= 25 } && name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_')

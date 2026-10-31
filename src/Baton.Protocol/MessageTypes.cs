@@ -56,4 +56,14 @@ public static class MessageTypes
     public const string AppCatalog = "apps.catalog";
     public const string AppPreferences = "apps.preferences";
     public const string AppPreferenceRemove = "apps.preference.remove";
+
+    /// <summary>The PC sends every device the recent handoffs; a device asks it to clear them.</summary>
+    public const string Timeline = "timeline";
+    public const string TimelineClear = "timeline.clear";
+
+    /// <summary>The PC noticed a phone come near it or go away, from the phone's Bluetooth signal.</summary>
+    public const string Proximity = "proximity";
+
+    /// <summary>A phone started walking (its step sensor), for the PC to tell leaving from sitting.</summary>
+    public const string DeviceMotion = "device.motion";
 }

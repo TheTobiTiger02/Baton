@@ -4,12 +4,16 @@ import android.os.Handler
 import android.os.Looper
 import dev.baton.android.protocol.Activity
 import dev.baton.android.protocol.ActivityApp
+import dev.baton.android.protocol.ActivityContent
 import dev.baton.android.protocol.ActivityKind
 import dev.baton.android.protocol.Wire
 
-/** The page each browser last showed, as read from its URL bar by [BatonAccessibilityService]. */
+/**
+ * The page each browser last showed, as read from its URL bar by [BatonAccessibilityService], and
+ * what Maps or WhatsApp showed ([AppPages]): a link, or for a chat no link opens, its name.
+ */
 object BrowserPages {
-    data class Page(val packageName: String, val url: String, val title: String?, val seenAt: Long)
+    data class Page(val packageName: String, val url: String?, val title: String?, val seenAt: Long, val content: ActivityContent? = null)
 
     private const val PAGE_LIFETIME_MS = 30 * 60 * 1000L
     private val handler = Handler(Looper.getMainLooper())
@@ -30,10 +34,10 @@ object BrowserPages {
         handler.post { onChanged?.invoke() }
     }
 
-    fun onPage(packageName: String, url: String, title: String?) = handler.post {
+    fun onPage(packageName: String, url: String?, title: String?, content: ActivityContent? = null) = handler.post {
         val previous = pages[packageName]
-        if (previous?.url == url && previous.title == title) return@post
-        pages[packageName] = Page(packageName, url, title, System.currentTimeMillis())
+        if (previous != null && previous.url == url && previous.title == title && previous.content == content) return@post
+        pages[packageName] = Page(packageName, url, title, System.currentTimeMillis(), content)
         onChanged?.invoke()
     }
 
@@ -49,11 +53,12 @@ object BrowserPages {
             id = "page:${page.packageName}",
             deviceId = deviceId,
             kind = ActivityKind.WebPage,
-            title = page.title?.takeIf { it.isNotBlank() } ?: readable(page.url),
+            title = page.title?.takeIf { it.isNotBlank() } ?: page.url?.let(::readable) ?: "",
             app = ActivityApp(appName(page.packageName), page.packageName),
             updatedAt = Wire.time(page.seenAt),
-            subtitle = hostOf(page.url),
-            url = page.url
+            subtitle = page.url?.let(::hostOf) ?: appName(page.packageName),
+            url = page.url,
+            content = page.content
         )
     }
 

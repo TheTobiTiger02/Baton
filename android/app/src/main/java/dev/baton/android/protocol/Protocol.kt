@@ -83,6 +83,10 @@ object MessageTypes {
     const val APP_CATALOG = "apps.catalog"
     const val APP_PREFERENCES = "apps.preferences"
     const val APP_PREFERENCE_REMOVE = "apps.preference.remove"
+    const val TIMELINE = "timeline"
+    const val TIMELINE_CLEAR = "timeline.clear"
+    const val PROXIMITY = "proximity"
+    const val DEVICE_MOTION = "device.motion"
 }
 
 object HandoffModes {
@@ -564,3 +568,28 @@ data class PairingLink(
         }
     }
 }
+
+/** One handoff in the timeline every device shares, as the PC keeps it; [activity] (without artwork) opens it again. */
+@Serializable
+data class TimelineEntry(
+    val requestId: String,
+    val title: String,
+    val startedAt: String,
+    val sourceDeviceId: String,
+    val targetDeviceId: String,
+    val status: HandoffStatus? = null,
+    val detail: String? = null,
+    val unconfirmed: Boolean = false,
+    val activity: Activity? = null
+)
+
+@Serializable
+data class TimelinePayload(val entries: List<TimelineEntry>)
+
+/** The PC noticed this phone come near it, or move away (from its Bluetooth signal, [dev.baton.android.link.NearbyBeacon]). */
+@Serializable
+data class ProximityPayload(val near: Boolean)
+
+/** This phone started walking (a few steps in a row), for the PC to tell leaving from sitting. */
+@Serializable
+data class MotionPayload(val walking: Boolean)

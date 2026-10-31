@@ -28,7 +28,8 @@ public sealed class HandoffCoordinator : IDisposable
     private readonly ConcurrentDictionary<string, (Activity Activity, Task<OpenResult> Open)> _speculative = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, byte> _opening = new(StringComparer.Ordinal);
     private readonly Timer _expiry;
-    public HandoffHistory History { get; } = new();
+    public HandoffHistory History { get; }
+    private int _timelineScheduled;
     private readonly HandoffSuggestions _suggestions = new();
     private readonly object _broadcastGate = new();
     private IReadOnlyList<Activity> _localActivities = [];
@@ -39,6 +40,8 @@ public sealed class HandoffCoordinator : IDisposable
         ActivityEnricher? enricher = null, AppDirectory? apps = null)
     {
         _host = host;
+        History = new HandoffHistory(Path.Combine(host.StorageDirectory, "handoff-history.dat"));
+        History.Changed += ScheduleTimeline;
         _sources = sources;
         _openers = openers;
         _enricher = enricher;
@@ -67,6 +70,7 @@ public sealed class HandoffCoordinator : IDisposable
             else
             {
                 _ = PushPreferencesAsync(deviceId);
+                _ = PushTimelineAsync(deviceId);
             }
 
             ScheduleBroadcast();
@@ -216,6 +220,34 @@ public sealed class HandoffCoordinator : IDisposable
         _ => mode == HandoffModes.Stream || ContinuesAsStream(activity)
     };
 
+    /// <summary>Changes come in bursts (sending, then opened): send the timeline once they settle.</summary>
+    private void ScheduleTimeline()
+    {
+        if (Interlocked.Exchange(ref _timelineScheduled, 1) == 1)
+        {
+            return;
+        }
+
+        _ = Task.Delay(TimeSpan.FromMilliseconds(500)).ContinueWith(_ =>
+        {
+            Interlocked.Exchange(ref _timelineScheduled, 0);
+            return PushTimelineAsync(null);
+        }, TaskScheduler.Default).Unwrap();
+    }
+
+    /// <summary>The shared timeline to one device, or to every connected one.</summary>
+    private async Task PushTimelineAsync(string? deviceId)
+    {
+        var payload = new TimelinePayload(History.Timeline());
+        var recipients = deviceId is null
+            ? _host.Devices.GetDevices().Select(device => device.DeviceId).Where(_host.IsConnected).ToArray()
+            : [deviceId];
+        foreach (var recipient in recipients)
+        {
+            await _host.SendAsync(recipient, MessageTypes.Timeline, payload);
+        }
+    }
+
     private async Task PushPreferencesAsync(string? deviceId)
     {
         if (_apps is null)
@@ -261,11 +293,12 @@ public sealed class HandoffCoordinator : IDisposable
     /// What to offer someone returning to this PC (see <see cref="HandoffSuggestions.Pick"/>), or
     /// null. An activity is offered once per <see cref="HandoffSuggestions.RepeatAfter"/>.
     /// </summary>
-    public (DeviceView Device, Activity Activity)? SuggestionForReturn()
+    /// <summary>What to offer from a phone (from <paramref name="deviceId"/> only, when given), at most once in a while.</summary>
+    public (DeviceView Device, Activity Activity)? SuggestionForReturn(string? deviceId = null)
     {
         var now = DateTimeOffset.UtcNow;
         var best = GetDevices()
-            .Where(device => device.Kind == DeviceKinds.Phone && device.Online)
+            .Where(device => device.Kind == DeviceKinds.Phone && device.Online && (deviceId is null || device.DeviceId == deviceId))
             .Select(device => (Device: device, Activity: HandoffSuggestions.Pick(device.Activities, device.Presence, now)))
             .Where(pair => pair.Activity is not null)
             .OrderByDescending(pair => pair.Activity!.Playback?.Playing == true)
@@ -592,6 +625,10 @@ public sealed class HandoffCoordinator : IDisposable
 
             case MessageTypes.AppCatalog:
                 _apps?.SetPhoneApps(deviceId, envelope.ReadRequired<AppCatalogPayload>().Apps);
+                break;
+
+            case MessageTypes.TimelineClear:
+                History.Clear();
                 break;
 
             case MessageTypes.AppPreferenceRemove:

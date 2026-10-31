@@ -177,15 +177,26 @@ public sealed class AppDirectory
                     return HandoffStatus.Opened;
                 }
 
-                // An app that takes links of its own kind (tg:, spotify:) gets the link itself.
+                // An app that takes links of its own kind (tg:, spotify:) gets the link itself, and a
+                // web link to a chat (wa.me) becomes one.
                 var known = Media.KnownApps.CounterpartOf(Platforms.Windows, id);
-                if (url is not null && known?.UriScheme is { } scheme && url.StartsWith(scheme + ":", StringComparison.OrdinalIgnoreCase))
+                if (url is not null && known?.UriScheme is { } scheme
+                    && (url.StartsWith(scheme + ":", StringComparison.OrdinalIgnoreCase) ? url : Media.ContentLinks.ForApp(scheme, url)) is { } appLink)
                 {
-                    Shell(url);
+                    Shell(appLink);
                     return HandoffStatus.Opened;
                 }
 
                 Launch(id);
+
+                // A chat no link opens (a WhatsApp group): WhatsApp's own search finds it.
+                if (url is null && known?.Provider == "whatsapp" && activity.Content is { Provider: "whatsapp", Query: { Length: > 0 } chat })
+                {
+                    _ = ChatSearch.WhatsAppAsync(chat);
+                    detail = $"Opened WhatsApp and searched for {chat}: pick the chat there.";
+                    return HandoffStatus.Fallback;
+                }
+
                 if (url is not null)
                 {
                     detail = $"Opened {choice.Label}; it can't be given the page itself.";
