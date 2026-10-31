@@ -98,7 +98,8 @@ object BatonNotifications {
     }
 
     /** "Continue X from your PC?" with a one-tap action, shown when the phone is picked up. */
-    fun suggestion(context: Context, pc: PeerInfo, activity: dev.baton.android.protocol.Activity) {
+    /** Offers [activity] from [pc]; it goes away by itself after [lastsMs] (a minute: offered on unlock, while looking). */
+    fun suggestion(context: Context, pc: PeerInfo, activity: dev.baton.android.protocol.Activity, lastsMs: Long = 60_000) {
         ensureChannels(context)
         suggested = pc.deviceId to activity.id
         val pull = HandoffActionReceiver.pull(context, pc.copy(activities = listOf(activity)))
@@ -110,7 +111,7 @@ object BatonNotifications {
             .setContentIntent(pending)
             .addAction(Notification.Action.Builder(null, "Continue here", pending).build())
             .setAutoCancel(true)
-            .setTimeoutAfter(60_000)
+            .setTimeoutAfter(lastsMs)
             .build()
         context.getSystemService(NotificationManager::class.java).notify(SUGGESTION_ID, notification)
     }

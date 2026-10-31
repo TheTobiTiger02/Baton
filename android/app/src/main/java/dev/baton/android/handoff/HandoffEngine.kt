@@ -180,6 +180,8 @@ object HandoffEngine {
         if (suggestions.tryOffer(pc.deviceId, activity)) BatonNotifications.suggestion(context, pc, activity)
     }
 
+    private const val LEAVING_OFFER_MS = 10 * 60_000L
+
     /** Offered because this phone left the PC: the PC still counts as in use for a while after. */
     @Volatile private var offeredOnLeaving = false
 
@@ -199,8 +201,11 @@ object HandoffEngine {
         // Just left: what the PC showed a moment ago counts, though it may still be "in use".
         val activity = Suggestions.pick(pc.activities, PresenceState.Idle) ?: return
         if (suggestions.tryOffer(pc.deviceId, activity)) {
-            BatonNotifications.suggestion(context, pc, activity)
+            // Marked first: the device list can update while the offer goes up, and the PC still
+            // counts as in use, which would read as being back at it and withdraw the offer at once.
             offeredOnLeaving = true
+            // Walking off, the phone is likely in a pocket: it waits until looked at, or until back at the PC.
+            BatonNotifications.suggestion(context, pc, activity, lastsMs = LEAVING_OFFER_MS)
         }
     }
 
