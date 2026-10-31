@@ -16,6 +16,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
+import dev.baton.android.BatonSettings
 import dev.baton.android.handoff.HandoffEngine
 import dev.baton.android.protocol.DeviceForgetPayload
 import dev.baton.android.protocol.DeviceInfoPayload
@@ -152,6 +153,7 @@ class LinkService : Service() {
         }, ContextCompat.RECEIVER_NOT_EXPORTED)
         HandoffEngine.start(this)
         PcRemote.start(this)
+        if (BatonSettings.wakeRelay(this)) WakeRelay.start(this)
         dev.baton.android.mirror.ShizukuAccess.init(this)
     }
 
@@ -172,6 +174,11 @@ class LinkService : Service() {
                     retryIndex = 0
                     connecting = false
                 }
+            }
+            ACTION_WAKE_RELAY -> {
+                if (BatonSettings.wakeRelay(this)) WakeRelay.start(this) else WakeRelay.stop()
+                if (Link.isReady) sendDeviceInfo()
+                return START_STICKY
             }
             ACTION_FORGET -> {
                 Link.send(MessageTypes.DEVICE_FORGET, DeviceForgetPayload("Forgotten on the phone."))
@@ -197,6 +204,7 @@ class LinkService : Service() {
         client.disconnect("Service stopped")
         HandoffEngine.stop()
         PcRemote.stop()
+        WakeRelay.stop()
         releaseLocks()
         scope.cancel()
         Link.setStatus(LinkStatus(if (trust.isPaired) LinkPhase.Offline else LinkPhase.Unpaired, "Stopped"))
@@ -317,6 +325,7 @@ class LinkService : Service() {
                 val payload = envelope.read<HostEndpointsPayload>()
                 endpoints.replaceAnnounced(payload.hostId, payload.endpoints)
                 payload.wake?.let { WakeOnLan.remember(this, it) }
+                WakeRelay.remember(this, payload.wakeKey, payload.wakeRelays)
             }
             MessageTypes.HEARTBEAT_PING -> Link.send(MessageTypes.HEARTBEAT_PONG, HeartbeatPayload())
             MessageTypes.HEARTBEAT_PONG -> Unit
@@ -409,7 +418,8 @@ class LinkService : Service() {
                 .let { minOf(it.width(), it.height()) to maxOf(it.width(), it.height()) }
         }.getOrDefault(screen)
         Link.send(MessageTypes.DEVICE_INFO, DeviceInfoPayload(trust.displayName, trust.model, screenWidth = real.first, screenHeight = real.second,
-            audioCodecs = dev.baton.android.stream.OpusAudio.decodable, batteryLevel = battery?.first, charging = battery?.second))
+            audioCodecs = dev.baton.android.stream.OpusAudio.decodable, batteryLevel = battery?.first, charging = battery?.second,
+            wakeRelay = if (BatonSettings.wakeRelay(this)) WakeRelay.addresses().takeIf { it.isNotEmpty() } else null))
     }
 
     private fun onError(error: ErrorPayload) {
@@ -539,6 +549,7 @@ class LinkService : Service() {
         const val ACTION_PAIR = "dev.baton.android.PAIR"
         const val ACTION_FORGET = "dev.baton.android.FORGET"
         const val ACTION_STOP = "dev.baton.android.STOP"
+        const val ACTION_WAKE_RELAY = "dev.baton.android.WAKE_RELAY"
         const val EXTRA_LINK = "link"
 
         fun start(context: Context) {
@@ -548,6 +559,11 @@ class LinkService : Service() {
         fun pair(context: Context, link: PairingLink, raw: String) {
             Link.setStatus(LinkStatus(LinkPhase.Pairing, "Pairing with ${link.pcName}…"))
             context.startForegroundService(Intent(context, LinkService::class.java).setAction(ACTION_PAIR).putExtra(EXTRA_LINK, raw))
+        }
+
+        /** The wake relay setting changed: listen (or stop) and tell the PC. */
+        fun wakeRelayChanged(context: Context) {
+            context.startService(Intent(context, LinkService::class.java).setAction(ACTION_WAKE_RELAY))
         }
 
         fun forget(context: Context) {

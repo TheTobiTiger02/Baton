@@ -140,6 +140,7 @@ internal sealed class SessionHandler(BatonHost host)
                     host.Devices.UpdateInfo(connection.DeviceId, info);
                     host.WindowStreams.SetAudioCodecs(connection.DeviceId, info.AudioCodecs);
                     host.Batteries.Set(connection.DeviceId, info.BatteryLevel, info.Charging);
+                    host.WakeRelays.Set(connection.DeviceId, info.WakeRelay);
                     if (info is { ScreenWidth: { } screenWidth, ScreenHeight: { } screenHeight })
                     {
                         host.WindowStreams.SetScreen(connection.DeviceId, screenWidth, screenHeight);

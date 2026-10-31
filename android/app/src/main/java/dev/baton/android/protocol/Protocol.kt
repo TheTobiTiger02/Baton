@@ -153,11 +153,22 @@ data class DiscoveryResponse(
 )
 
 @Serializable
-data class HostEndpointsPayload(val hostId: String, val endpoints: List<HostEndpoint>, val wake: List<WakeTarget>? = null)
+data class HostEndpointsPayload(
+    val hostId: String,
+    val endpoints: List<HostEndpoint>,
+    val wake: List<WakeTarget>? = null,
+    /** Signs requests to wake the PC from away (base64); only paired devices get it. */
+    val wakeKey: String? = null,
+    val wakeRelays: List<WakeRelay>? = null
+)
 
 /** A PC network card's address (`AA:BB:CC:DD:EE:FF`) and its network's broadcast address. */
 @Serializable
 data class WakeTarget(val mac: String, val broadcast: String)
+
+/** A paired device that wakes the PC when asked, and the addresses it takes requests on. */
+@Serializable
+data class WakeRelay(val deviceId: String, val name: String, val addresses: List<String>)
 
 @Serializable
 data class SessionChallengePayload(
@@ -215,7 +226,9 @@ data class DeviceInfoPayload(
     /** Compressed audio this phone plays (`opus`); PCM always works. */
     val audioCodecs: List<String>? = null,
     /** With [batteryLevel] (percent): resent whenever either changes. */
-    val charging: Boolean? = null
+    val charging: Boolean? = null,
+    /** Where this device takes requests to wake the PC, when it offers to; null when it doesn't. */
+    val wakeRelay: List<String>? = null
 )
 
 @Serializable
