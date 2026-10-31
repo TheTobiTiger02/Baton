@@ -28,8 +28,14 @@ public sealed class NearbyDevices : IDisposable
     /// <summary>A wall or a room away.</summary>
     public const double AwayRssi = -92;
 
-    /// <summary>A phone not heard from this long has gone (out of range, or Bluetooth off).</summary>
-    public static readonly TimeSpan GoneAfter = TimeSpan.FromSeconds(45);
+    /// <summary>
+    /// A phone not heard from this long has gone (out of range, or Bluetooth off). A room away the
+    /// signal usually stops altogether rather than fading; at the desk there's a reading every few seconds.
+    /// </summary>
+    public static readonly TimeSpan GoneAfter = TimeSpan.FromSeconds(30);
+
+    /// <summary>What Windows reports when it has no strength for a packet: not a reading.</summary>
+    private const short NoReading = -127;
 
     private static readonly byte[] Magic = [(byte)'B', (byte)'N', 1];
     private readonly DeviceRegistry _devices;
@@ -78,6 +84,7 @@ public sealed class NearbyDevices : IDisposable
 
             var data = section.Data.ToArray();
             if (data.Length == Magic.Length + 8 && data.AsSpan(0, Magic.Length).SequenceEqual(Magic)
+                && args.RawSignalStrengthInDBm > NoReading
                 && Recognize(data.AsSpan(Magic.Length), DateTimeOffset.UtcNow) is { } deviceId)
             {
                 Observe(deviceId, args.RawSignalStrengthInDBm, DateTimeOffset.UtcNow);
