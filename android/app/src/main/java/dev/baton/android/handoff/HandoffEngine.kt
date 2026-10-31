@@ -192,6 +192,7 @@ object HandoffEngine {
      */
     fun onProximity(context: Context, near: Boolean) {
         LinkDiagnostics.record(if (near) "nearby.near" else "nearby.away")
+        dev.baton.android.link.StepWatch.setNear(near)
         if (near) {
             if (offeredOnLeaving) BatonNotifications.cancelSuggestion(context)
             offeredOnLeaving = false
@@ -216,6 +217,7 @@ object HandoffEngine {
 
     /** The offer is stale once the user is back at the PC or the activity is gone there. */
     private fun withdrawStaleSuggestion(context: Context, peers: List<dev.baton.android.protocol.PeerInfo>) {
+        dev.baton.android.link.StepWatch.setPcInUse(peers.any { it.kind == "pc" && it.online && it.presence == PresenceState.Active })
         val offered = BatonNotifications.suggested ?: return
         val pc = peers.firstOrNull { it.deviceId == offered.first }
         val backAtPc = pc?.presence == PresenceState.Active && !offeredOnLeaving

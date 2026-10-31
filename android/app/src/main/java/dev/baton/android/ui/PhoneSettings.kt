@@ -121,7 +121,8 @@ fun NearbySetting() {
                 Text("A quiet Bluetooth signal tells your PC when this phone comes near or goes away, and the step counter " +
                     "notices you walking off. Walk away and this phone offers what the PC was showing; sit down and the PC " +
                     "offers what this phone was doing. It only suggests, and the signal changes every 15 minutes, so only " +
-                    "your PC recognises it.",
+                    "your PC recognises it. While you use the PC with this phone beside it, the phone stays awake enough to " +
+                    "count steps: about 1% battery an hour.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.width(Tokens.Space3))
