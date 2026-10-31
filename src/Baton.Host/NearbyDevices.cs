@@ -21,16 +21,22 @@ public sealed class NearbyDevices : IDisposable
 
     /// <summary>
     /// A phone at the desk. A PC's adapter often sits inside the case, so readings are weak and
-    /// jumpy even close by: -68 to -83 dBm for a phone on the desk next to one.
+    /// jumpy even close by: -62 to -76 dBm on the desk, single readings down to -89.
     /// </summary>
     public const double NearRssi = -80;
 
-    /// <summary>A wall or a room away.</summary>
-    public const double AwayRssi = -92;
+    /// <summary>
+    /// Leaving: the smoothed signal at or below this for <see cref="LeavingFor"/>, while still heard.
+    /// Walking out to the doorway reads -78 to -85, before the signal stops a room away.
+    /// </summary>
+    public const double LeavingRssi = -83;
+
+    /// <summary>Long enough that the desk's brief dips (a hand over the phone, a body in between) don't count.</summary>
+    public static readonly TimeSpan LeavingFor = TimeSpan.FromSeconds(6);
 
     /// <summary>
     /// A phone not heard from this long has gone (out of range, or Bluetooth off). A room away the
-    /// signal stops altogether rather than fading to <see cref="AwayRssi"/>; at the desk there's a
+    /// signal stops altogether; at the desk there's a
     /// reading every few seconds, so this is well clear of the gaps there.
     /// </summary>
     public static readonly TimeSpan GoneAfter = TimeSpan.FromSeconds(20);
@@ -39,7 +45,7 @@ public sealed class NearbyDevices : IDisposable
     /// The same, when the signal was already weak before it stopped (below <see cref="NearRssi"/>):
     /// that is someone walking out of range, so it needn't wait as long.
     /// </summary>
-    public static readonly TimeSpan FadedAfter = TimeSpan.FromSeconds(10);
+    public static readonly TimeSpan FadedAfter = TimeSpan.FromSeconds(8);
 
     /// <summary>What Windows reports when it has no strength for a packet: not a reading.</summary>
     private const short NoReading = -127;
@@ -128,6 +134,7 @@ public sealed class NearbyDevices : IDisposable
             var fresh = signal.Strength is null || now - signal.HeardAt > GoneAfter;
             signal.Strength = fresh ? rssi : signal.Strength * 0.7 + rssi * 0.3;
             signal.HeardAt = now;
+            signal.WeakSince = signal.Strength <= LeavingRssi ? signal.WeakSince ?? now : null;
         }
 
         Evaluate(now);
@@ -144,11 +151,12 @@ public sealed class NearbyDevices : IDisposable
             {
                 strength = signal.Strength ?? double.NegativeInfinity;
                 var gone = now - signal.HeardAt > (strength < NearRssi ? FadedAfter : GoneAfter);
+                var leaving = signal.WeakSince is { } weak && now - weak >= LeavingFor;
                 next = signal.Near switch
                 {
                     // The first reading sets where a phone is: being near when Baton starts isn't arriving.
                     null => !gone && strength >= NearRssi,
-                    true when gone || strength <= AwayRssi => false,
+                    true when gone || leaving => false,
                     false when !gone && strength >= NearRssi => true,
                     _ => signal.Near
                 };
@@ -185,5 +193,8 @@ public sealed class NearbyDevices : IDisposable
         public double? Strength;
         public DateTimeOffset HeardAt;
         public bool? Near;
+
+        /// <summary>Since when the smoothed signal has been at or below <see cref="LeavingRssi"/>.</summary>
+        public DateTimeOffset? WeakSince;
     }
 }

@@ -14,6 +14,20 @@ public class NearbyDevicesTests
     }
 
     [Fact]
+    public void TheDesksDipsAreNotLeaving()
+    {
+        using var nearby = new NearbyDevices(new DeviceRegistry(null), new DiagnosticsLog());
+        var now = DateTimeOffset.UtcNow;
+        // The first walk test's desk readings, a reading about every 2 s, dips to -89 among them.
+        var desk = new[] { -70, -67, -73, -62, -68, -66, -73, -62, -89, -77, -84, -76, -83, -69, -71, -67, -70, -68, -62, -64, -67, -73, -64 };
+        for (var index = 0; index < desk.Length; index++)
+        {
+            nearby.Observe("phone", desk[index], now.AddSeconds(index * 2));
+            Assert.True(nearby.IsNear("phone"));
+        }
+    }
+
+    [Fact]
     public void NearAndAwayNeedAClearChangeAndStartingNearIsNotArriving()
     {
         var registry = new DeviceRegistry(null);
@@ -46,15 +60,25 @@ public class NearbyDevicesTests
         nearby.Observe("phone", -84, gone.AddSeconds(5));
         Assert.False(nearby.IsNear("phone"));
 
-        // Walking out: the signal fades, then stops. That is away sooner than a strong signal stopping.
+        // Still heard, but weakly, in the hallway: away once the smoothed signal has stayed weak for 6 s.
         var back = gone.AddMinutes(1);
         for (var second = 0; second < 10; second++) nearby.Observe("phone", -65, back.AddSeconds(second));
         Assert.True(nearby.IsNear("phone"));
-        // As on the walk test: the last readings in the 80s, smoothed to about -83 before it stops.
-        foreach (var (rssi, second) in new[] { (-84, 10), (-88, 11), (-90, 12), (-90, 13) }) nearby.Observe("phone", rssi, back.AddSeconds(second));
-        nearby.Evaluate(back.AddSeconds(13) + NearbyDevices.FadedAfter - TimeSpan.FromSeconds(1));
+        for (var second = 10; second < 40; second += 2)
+        {
+            nearby.Observe("phone", second % 4 == 0 ? -84 : -86, back.AddSeconds(second));
+        }
+
+        Assert.False(nearby.IsNear("phone"));
+
+        // A signal that fades and stops: away after the shorter silence.
+        var again = back.AddMinutes(1);
+        for (var second = 0; second < 10; second++) nearby.Observe("phone", -65, again.AddSeconds(second));
+        // As on the walk tests: the last readings in the 80s, smoothed to about -83 when it stops.
+        foreach (var (rssi, second) in new[] { (-84, 10), (-88, 11), (-90, 12), (-90, 13) }) nearby.Observe("phone", rssi, again.AddSeconds(second));
+        nearby.Evaluate(again.AddSeconds(13 + 4));
         Assert.True(nearby.IsNear("phone"));
-        nearby.Evaluate(back.AddSeconds(13) + NearbyDevices.FadedAfter + TimeSpan.FromSeconds(1));
+        nearby.Evaluate(again.AddSeconds(13) + NearbyDevices.FadedAfter + TimeSpan.FromSeconds(1));
         Assert.False(nearby.IsNear("phone"));
         Assert.Null(nearby.IsNear("tablet"));
     }
