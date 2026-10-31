@@ -45,6 +45,17 @@ public class NearbyDevicesTests
         // A faint reading from the next room after the silence isn't coming back, whatever came before.
         nearby.Observe("phone", -84, gone.AddSeconds(5));
         Assert.False(nearby.IsNear("phone"));
+
+        // Walking out: the signal fades, then stops. That is away sooner than a strong signal stopping.
+        var back = gone.AddMinutes(1);
+        for (var second = 0; second < 10; second++) nearby.Observe("phone", -65, back.AddSeconds(second));
+        Assert.True(nearby.IsNear("phone"));
+        // As on the walk test: the last readings in the 80s, smoothed to about -83 before it stops.
+        foreach (var (rssi, second) in new[] { (-84, 10), (-88, 11), (-90, 12), (-90, 13) }) nearby.Observe("phone", rssi, back.AddSeconds(second));
+        nearby.Evaluate(back.AddSeconds(13) + NearbyDevices.FadedAfter - TimeSpan.FromSeconds(1));
+        Assert.True(nearby.IsNear("phone"));
+        nearby.Evaluate(back.AddSeconds(13) + NearbyDevices.FadedAfter + TimeSpan.FromSeconds(1));
+        Assert.False(nearby.IsNear("phone"));
         Assert.Null(nearby.IsNear("tablet"));
     }
 }

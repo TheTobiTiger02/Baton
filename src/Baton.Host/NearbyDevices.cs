@@ -30,9 +30,16 @@ public sealed class NearbyDevices : IDisposable
 
     /// <summary>
     /// A phone not heard from this long has gone (out of range, or Bluetooth off). A room away the
-    /// signal usually stops altogether rather than fading; at the desk there's a reading every few seconds.
+    /// signal stops altogether rather than fading to <see cref="AwayRssi"/>; at the desk there's a
+    /// reading every few seconds, so this is well clear of the gaps there.
     /// </summary>
-    public static readonly TimeSpan GoneAfter = TimeSpan.FromSeconds(30);
+    public static readonly TimeSpan GoneAfter = TimeSpan.FromSeconds(20);
+
+    /// <summary>
+    /// The same, when the signal was already weak before it stopped (below <see cref="NearRssi"/>):
+    /// that is someone walking out of range, so it needn't wait as long.
+    /// </summary>
+    public static readonly TimeSpan FadedAfter = TimeSpan.FromSeconds(10);
 
     /// <summary>What Windows reports when it has no strength for a packet: not a reading.</summary>
     private const short NoReading = -127;
@@ -48,7 +55,7 @@ public sealed class NearbyDevices : IDisposable
     {
         _devices = devices;
         _diagnostics = diagnostics;
-        _timer = new Timer(_ => Evaluate(DateTimeOffset.UtcNow), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+        _timer = new Timer(_ => Evaluate(DateTimeOffset.UtcNow), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
     }
 
     /// <summary>A phone came near (true) or went away (false). Any thread.</summary>
@@ -136,7 +143,7 @@ public sealed class NearbyDevices : IDisposable
             lock (signal)
             {
                 strength = signal.Strength ?? double.NegativeInfinity;
-                var gone = now - signal.HeardAt > GoneAfter;
+                var gone = now - signal.HeardAt > (strength < NearRssi ? FadedAfter : GoneAfter);
                 next = signal.Near switch
                 {
                     // The first reading sets where a phone is: being near when Baton starts isn't arriving.
